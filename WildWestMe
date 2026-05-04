@@ -89,14 +89,16 @@ local CONFIG = {
 	WorldTracers = false,
 	WorldName = true,
 	WorldDistance = true,
+	WorldPlayerWeapon = true,
 	WorldShowHealth = true,
-	WorldPlayerHealth = true,
-	WorldAnimalHealth = false,
+	WorldPlayerHealth = false,
+	WorldAnimalHealth = true,
 	WorldHorseHealth = true,
 	WorldNPCHealth = false,
 	WorldHealthMode = "Bar",
 	WorldTextSize = 12,
 	WorldMaxDrawDistance = 3000, -- slider supports 0-25000, 0 means unlimited
+	WorldHealthBarMaxDistance = 400,
 	ZayHorse = false,
 	ZaySelf = false,
 	ZayMode = false,
@@ -117,7 +119,7 @@ local CONFIG = {
 	NotificationColor = Color3.fromRGB(178, 112, 255),
 	NotificationBackgroundColor = Color3.fromRGB(18, 14, 28),
 
-	WorldBrightness = 200,
+	WorldBrightness = 100,
 	WorldExposure = math.clamp(math.floor(Lighting.ExposureCompensation * 100 + 0.5), -500, 500),
 	WorldClockTime = math.clamp(math.floor(Lighting.ClockTime * 100 + 0.5), 0, 2400),
 	WorldEditorLocked = true,
@@ -271,6 +273,8 @@ lastLootColorKey = ""
 healthCache = setmetatable({}, { __mode = "k" })
 healthMaxCache = setmetatable({}, { __mode = "k" })
 ownHorseCache = setmetatable({}, { __mode = "k" })
+horseModelCache = setmetatable({}, { __mode = "k" })
+playerLoadoutItemCache = setmetatable({}, { __mode = "k" })
 worldTracersWereVisible = false
 lastZayWorldUpdate = 0
 lastLocalMorphUpdate = 0
@@ -1936,7 +1940,7 @@ setWorldClockTimeSlider = nil
 
 local aimControlsSection = makeSection(leftPane, "Aim Controls", 1, 5)
 local targetFilterSection = makeSection(leftPane, "Target Filters", 2, 3)
-local viewEspSection = makeSection(worldLeftPane, "ESP Settings", 1, 8)
+local viewEspSection = makeSection(worldLeftPane, "ESP Settings", 1, 9)
 itemSection = makeSection(worldLeftPane, "Item ESP", 2, 1)
 oreSection = makeSection(worldLeftPane, "Ore ESP", 3, 6)
 lootControlsSection = makeSection(lootLeftPane, "Loot ESP", 1, 2)
@@ -2232,14 +2236,15 @@ local worldChamsButton = makeToggleButton(viewEspSection, "Chams", 5)
 local worldTracerButton = makeToggleButton(viewEspSection, "Tracers", 6)
 local worldNameButton = makeToggleButton(viewEspSection, "Name", 7)
 local worldDistanceButton = makeToggleButton(viewEspSection, "Distance", 8)
-local worldShowHealthButton = makeToggleButton(viewEspSection, "Show Health", 9)
-local worldPlayerHPButton = makeToggleButton(viewEspSection, "Player HP", 10)
-local worldAnimalHPButton = makeToggleButton(viewEspSection, "Animal HP", 11)
-local worldHorseHPButton = makeToggleButton(viewEspSection, "Horse HP", 12)
-local worldHealthModeButton = makeButton(viewEspSection, "", 13)
-zayHorseButton = makeToggleButton(viewEspSection, "Zay Horse", 14)
-zayModeButton = makeToggleButton(viewEspSection, "Zay Mode", 15)
-zaySelfButton = makeToggleButton(viewEspSection, "Zay Self", 16)
+local worldPlayerWeaponButton = makeToggleButton(viewEspSection, "Player Weapon", 9)
+local worldShowHealthButton = makeToggleButton(viewEspSection, "Show Health", 10)
+local worldPlayerHPButton = makeToggleButton(viewEspSection, "Player HP", 11)
+local worldAnimalHPButton = makeToggleButton(viewEspSection, "Animal HP", 12)
+local worldHorseHPButton = makeToggleButton(viewEspSection, "Horse HP", 13)
+local worldHealthModeButton = makeButton(viewEspSection, "", 14)
+zayHorseButton = makeToggleButton(viewEspSection, "Zay Horse", 15)
+zayModeButton = makeToggleButton(viewEspSection, "Zay Mode", 16)
+zaySelfButton = makeToggleButton(viewEspSection, "Zay Self", 17)
 droppedItemButton = makeToggleButton(itemSection, "Dropped Items", 1)
 bankESPButton = makeToggleButton(lootControlsSection, "Bank", 1)
 boatESPButton = makeToggleButton(lootControlsSection, "Swamp Boat", 2)
@@ -2524,6 +2529,7 @@ local function refreshGui()
 	setToggleDisplay(worldTracerButton, "Tracers", CONFIG.WorldTracers)
 	setToggleDisplay(worldNameButton, "Name", CONFIG.WorldName)
 	setToggleDisplay(worldDistanceButton, "Distance", CONFIG.WorldDistance)
+	setToggleDisplay(worldPlayerWeaponButton, "Player Weapon", CONFIG.WorldPlayerWeapon)
 	setToggleDisplay(worldShowHealthButton, "Show Health", CONFIG.WorldShowHealth)
 	setToggleDisplay(worldPlayerHPButton, "Player HP", CONFIG.WorldPlayerHealth)
 	setToggleDisplay(worldAnimalHPButton, "Animal HP", CONFIG.WorldAnimalHealth)
@@ -3136,6 +3142,14 @@ end)
 
 worldDistanceButton.MouseButton1Click:Connect(function()
 	CONFIG.WorldDistance = not CONFIG.WorldDistance
+	if refreshWorldESP then
+		refreshWorldESP(true)
+	end
+	refreshGui()
+end)
+
+worldPlayerWeaponButton.MouseButton1Click:Connect(function()
+	CONFIG.WorldPlayerWeapon = not CONFIG.WorldPlayerWeapon
 	if refreshWorldESP then
 		refreshWorldESP(true)
 	end
@@ -3858,11 +3872,51 @@ function isHorseModel(model)
 		return false
 	end
 
+	local now = os.clock()
+	local cached = horseModelCache[model]
+	if type(cached) == "table" and (cached.Value or now - cached.Time < 3) then
+		return cached.Value
+	elseif type(cached) == "boolean" then
+		return cached
+	end
+
 	local rootModel = getEntityRootModel(model, "Animal") or model
-	local normalizedName = normalizeLookupText(rootModel.Name)
-	return string.find(normalizedName, "horse", 1, true) ~= nil
-		or rootModel:FindFirstChild("HorseStats") ~= nil
-		or model:FindFirstChild("HorseStats") ~= nil
+	local function looksLikeHorse(instance)
+		return instance ~= nil and string.find(normalizeLookupText(instance.Name), "horse", 1, true) ~= nil
+	end
+
+	local isHorse = looksLikeHorse(rootModel) or looksLikeHorse(model)
+	local _, _, animalsFolder = getEntityFolders()
+	local current = model
+
+	while not isHorse and current and current ~= animalsFolder and current ~= Workspace do
+		isHorse = looksLikeHorse(current)
+		current = current.Parent
+	end
+
+	if not isHorse then
+		for _, descendant in ipairs(rootModel:GetDescendants()) do
+			if looksLikeHorse(descendant) then
+				isHorse = true
+				break
+			end
+		end
+	end
+
+	if not isHorse then
+		isHorse = rootModel:FindFirstChild("HorseStats", true) ~= nil or model:FindFirstChild("HorseStats", true) ~= nil
+	end
+
+	local cacheEntry = {
+		Time = now,
+		Value = isHorse
+	}
+	horseModelCache[model] = cacheEntry
+	if rootModel then
+		horseModelCache[rootModel] = cacheEntry
+	end
+
+	return isHorse
 end
 
 function isLocalPlayerModel(model)
@@ -4042,7 +4096,26 @@ function isOwnModel(model)
 	return false
 end
 
-function getTargetDisplayName(model)
+function getAnimalDisplayName(model)
+	local rootModel = getEntityRootModel(model, "Animal") or model
+	if isHorseModel(rootModel or model) then
+		return "Horse"
+	end
+
+	local nameText = rootModel and rootModel.Name or model and model.Name or "Animal"
+	local normalizedName = normalizeLookupText(nameText)
+	if normalizedName == "" or normalizedName == "model" then
+		nameText = model and model.Name or "Animal"
+	end
+
+	return nameText
+end
+
+function getTargetDisplayName(model, groupName)
+	if groupName == "Animal" then
+		return getAnimalDisplayName(model)
+	end
+
 	local player = getPlayerForModel(model)
 	if player then
 		if player.DisplayName and player.DisplayName ~= "" then
@@ -4053,6 +4126,83 @@ function getTargetDisplayName(model)
 	end
 
 	return model.Name
+end
+
+function getLoadoutItemName(instanceName)
+	local text = tostring(instanceName or "")
+	local prefix = "loadoutitem/"
+
+	if string.sub(string.lower(text), 1, #prefix) == prefix then
+		return string.sub(text, #prefix + 1)
+	end
+
+	return nil
+end
+
+function isIgnoredPlayerWeaponModelName(instanceName)
+	local normalized = normalizeLookupText(instanceName)
+	if normalized == ""
+		or normalized == "model"
+		or normalized == "humanoid"
+		or normalized == "humanoidrootpart"
+		or normalized == "head"
+		or normalized == "uppertorso"
+		or normalized == "lowertorso"
+		or normalized == "torso"
+	then
+		return true
+	end
+
+	return string.find(normalized, "holster", 1, true) ~= nil
+		or string.find(normalized, "sheathe", 1, true) ~= nil
+		or string.find(normalized, "scabbard", 1, true) ~= nil
+end
+
+function getPlayerWeaponName(model)
+	local entityRoot = getEntityRootModel(model, "Player") or model
+	if not entityRoot then
+		return nil
+	end
+
+	local cache = playerLoadoutItemCache[entityRoot]
+	if not cache then
+		cache = {}
+		playerLoadoutItemCache[entityRoot] = cache
+	end
+
+	for _, child in ipairs(entityRoot:GetChildren()) do
+		if child:IsA("Model") then
+			local loadoutName = getLoadoutItemName(child.Name)
+			if loadoutName and loadoutName ~= "" then
+				cache[normalizeLookupText(loadoutName)] = loadoutName
+			end
+		end
+	end
+
+	local fallbackName = nil
+	local fallbackCount = 0
+
+	for _, child in ipairs(entityRoot:GetChildren()) do
+		if child:IsA("Model") and not getLoadoutItemName(child.Name) then
+			local normalized = normalizeLookupText(child.Name)
+			if cache[normalized] then
+				return child.Name
+			end
+
+			if not isIgnoredPlayerWeaponModelName(child.Name)
+				and child:FindFirstChildWhichIsA("BasePart", true)
+			then
+				fallbackName = child.Name
+				fallbackCount += 1
+			end
+		end
+	end
+
+	if fallbackCount == 1 then
+		return fallbackName
+	end
+
+	return nil
 end
 
 function normalizeLookupText(value)
@@ -4089,7 +4239,7 @@ function getPlayerForModel(model)
 	for _, attributeName in ipairs({ "Player", "Owner", "PlayerName", "Username", "UserName", "DisplayName", "CharacterName" }) do
 		local value = model:GetAttribute(attributeName)
 		if value ~= nil then
-			table.insert(nameHints, normalizeLookupText(value))
+			nameHints[#nameHints + 1] = normalizeLookupText(value)
 		end
 	end
 
@@ -4103,7 +4253,7 @@ function getPlayerForModel(model)
 		end
 
 		if child:IsA("StringValue") then
-			table.insert(nameHints, normalizeLookupText(child.Value))
+			nameHints[#nameHints + 1] = normalizeLookupText(child.Value)
 		end
 	end
 
@@ -4390,7 +4540,7 @@ function getHealthInfo(model, groupName)
 		return nil, nil, nil
 	end
 
-	local player = getPlayerForModel(model)
+	local player = groupName == "Player" and getPlayerForModel(model) or nil
 	local entityRoot = getHealthEntityRoot(model, groupName)
 
 	if entityRoot then
@@ -4444,7 +4594,11 @@ function isWorldHealthEnabled(groupName, horseModel)
 	if groupName == "Player" then
 		return CONFIG.WorldPlayerHealth
 	elseif groupName == "Animal" then
-		return horseModel and CONFIG.WorldHorseHealth or CONFIG.WorldAnimalHealth
+		if horseModel then
+			return CONFIG.WorldHorseHealth
+		end
+
+		return CONFIG.WorldAnimalHealth
 	end
 
 	return false
@@ -4869,7 +5023,7 @@ function refreshWorldCandidates(force)
 		end
 	end
 
-	if (CONFIG.WorldAnimals or CONFIG.ZayHorse or (CONFIG.WorldShowHealth and CONFIG.WorldHorseHealth)) and animalsFolder then
+	if (CONFIG.WorldAnimals or CONFIG.ZayHorse or (CONFIG.WorldShowHealth and (CONFIG.WorldAnimalHealth or CONFIG.WorldHorseHealth))) and animalsFolder then
 		addWorldModelsFromFolder(animalsFolder, "Animal", seen)
 	end
 
@@ -4890,6 +5044,10 @@ clearWorldESP = function()
 
 		if esp.HealthBillboard then
 			esp.HealthBillboard:Destroy()
+		end
+
+		if esp.WeaponBillboard then
+			esp.WeaponBillboard:Destroy()
 		end
 
 		if esp.Tracer then
@@ -4967,6 +5125,31 @@ function makeWorldESPObject(model)
 	healthFill.Parent = healthBack
 	makeCorner(healthFill, 4)
 
+	local weaponBillboard = Instance.new("BillboardGui")
+	weaponBillboard.Name = "SoftAimWorldESPWeapon"
+	weaponBillboard.Size = UDim2.fromOffset(190, 22)
+	weaponBillboard.StudsOffset = Vector3.new(0, -3, 0)
+	weaponBillboard.AlwaysOnTop = true
+	weaponBillboard.Enabled = false
+	weaponBillboard.MaxDistance = 100000
+	weaponBillboard.Parent = screenGui
+
+	local weaponLabel = Instance.new("TextLabel")
+	weaponLabel.Size = UDim2.fromScale(1, 1)
+	weaponLabel.BackgroundTransparency = 1
+	weaponLabel.BorderSizePixel = 0
+	weaponLabel.TextColor3 = Color3.fromRGB(255, 230, 0)
+	weaponLabel.Font = Enum.Font.GothamSemibold
+	weaponLabel.TextSize = CONFIG.WorldTextSize
+	weaponLabel.TextScaled = false
+	weaponLabel.TextWrapped = false
+	weaponLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	weaponLabel.TextXAlignment = Enum.TextXAlignment.Center
+	weaponLabel.TextYAlignment = Enum.TextYAlignment.Center
+	weaponLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	weaponLabel.TextStrokeTransparency = 0.18
+	weaponLabel.Parent = weaponBillboard
+
 	local tracer = Instance.new("Frame")
 	tracer.Name = "SoftAimWorldESPTracer"
 	tracer.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -4984,6 +5167,8 @@ function makeWorldESPObject(model)
 	esp.Label = label
 	esp.HealthBillboard = healthBillboard
 	esp.HealthFill = healthFill
+	esp.WeaponBillboard = weaponBillboard
+	esp.WeaponLabel = weaponLabel
 	esp.Tracer = tracer
 
 	worldEspObjects[model] = esp
@@ -5007,6 +5192,7 @@ refreshWorldESP = function(force)
 			esp.Highlight.Enabled = false
 			esp.Billboard.Enabled = false
 			esp.HealthBillboard.Enabled = false
+			esp.WeaponBillboard.Enabled = false
 			esp.Tracer.Visible = false
 			esp.WorldVisible = false
 		end
@@ -5046,10 +5232,11 @@ refreshWorldESP = function(force)
 		local ownHorse = entry.Group == "Animal" and isOwnHorseModel(model)
 		local horseModel = entry.Group == "Animal" and isHorseModel(model)
 		local showHealth = isWorldHealthEnabled(entry.Group, horseModel)
+		local normalAnimalVisible = entry.Group ~= "Animal" or CONFIG.WorldAnimals
 		if entry.Group == "Animal"
-			and not CONFIG.WorldAnimals
+			and not normalAnimalVisible
 			and not (ownHorse and CONFIG.ZayHorse)
-			and not (horseModel and showHealth)
+			and not showHealth
 		then
 			continue
 		end
@@ -5070,26 +5257,33 @@ refreshWorldESP = function(force)
 		local textParts = {}
 
 		if ownHorse then
-			table.insert(textParts, "YOUR HORSEY")
+			textParts[#textParts + 1] = "YOUR HORSEY"
 		elseif CONFIG.WorldName then
-			local nameOk, displayName = pcall(getTargetDisplayName, model)
+			local nameOk, displayName = pcall(getTargetDisplayName, model, entry.Group)
 			local nameText = (nameOk and displayName) or model.Name
-			table.insert(textParts, nameText)
+			textParts[#textParts + 1] = nameText
 		end
 
 		if CONFIG.WorldDistance then
-			table.insert(textParts, tostring(math.floor(distance)) .. " studs")
+			textParts[#textParts + 1] = tostring(math.floor(distance)) .. " studs"
 		end
 
 		local healthCurrent = nil
 		local healthMaximum = nil
 		local healthPercent = nil
-		if showHealth then
+		local healthBarInRange = CONFIG.WorldHealthBarMaxDistance <= 0 or distance <= CONFIG.WorldHealthBarMaxDistance
+		local needsHealthValue = showHealth and (CONFIG.WorldHealthMode == "Percent" or healthBarInRange)
+		if needsHealthValue then
 			healthCurrent, healthMaximum, healthPercent = getCachedHealthInfo(model, entry.Group)
 			if CONFIG.WorldHealthMode == "Percent" and healthPercent then
-				table.insert(textParts, tostring(math.floor(math.clamp(healthPercent, 0, 1) * 100 + 0.5)) .. "% HP")
+				textParts[#textParts + 1] = tostring(math.floor(math.clamp(healthPercent, 0, 1) * 100 + 0.5)) .. "% HP"
 				showText = true
 			end
+		end
+
+		local weaponName = nil
+		if entry.Group == "Player" and CONFIG.WorldPlayerWeapon then
+			weaponName = getPlayerWeaponName(model)
 		end
 
 		esp.Highlight.FillColor = espColor
@@ -5098,7 +5292,7 @@ refreshWorldESP = function(force)
 		esp.Highlight.OutlineTransparency = ownHorse and CONFIG.ZayHorse and 0 or 0.18
 		esp.Highlight.DepthMode = ownHorse and CONFIG.ZayHorse and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.AlwaysOnTop
 		esp.Highlight.Adornee = model
-		esp.Highlight.Enabled = CONFIG.WorldChams or (ownHorse and CONFIG.ZayHorse)
+		esp.Highlight.Enabled = (CONFIG.WorldChams and normalAnimalVisible) or (ownHorse and CONFIG.ZayHorse)
 
 		esp.Billboard.Adornee = root
 		esp.Billboard.Enabled = showText
@@ -5117,11 +5311,28 @@ refreshWorldESP = function(force)
 		esp.WorldVisible = true
 		esp.LastSeen = now
 
-		if showHealth and CONFIG.WorldHealthMode == "Bar" and healthPercent then
-			local visualSize = getModelVisualSize(model)
+		local visualSize = nil
+		if weaponName and weaponName ~= "" then
+			visualSize = getModelVisualSize(model)
+			esp.WeaponBillboard.Adornee = root
+			esp.WeaponBillboard.StudsOffset = Vector3.new(0, -math.clamp((visualSize.Y / 2) + 0.8, 2.5, 6), 0)
+			esp.WeaponBillboard.Size = UDim2.fromOffset(math.clamp(CONFIG.WorldTextSize * 14, 150, 270), math.clamp(CONFIG.WorldTextSize * 1.8, 18, 34))
+			esp.WeaponBillboard.Enabled = true
+			esp.WeaponLabel.TextColor3 = Color3.fromRGB(255, 230, 0)
+			esp.WeaponLabel.TextSize = CONFIG.WorldTextSize
+			esp.WeaponLabel.Text = weaponName
+		else
+			esp.WeaponBillboard.Enabled = false
+		end
+
+		if showHealth and CONFIG.WorldHealthMode == "Bar" and healthPercent and healthBarInRange then
+			visualSize = visualSize or getModelVisualSize(model)
+			local barHeight = math.clamp(visualSize.Y * 0.95, 2.2, 5.2)
+			local barWidth = math.clamp(barHeight * 0.055, 0.12, 0.2)
+			local sideOffset = math.clamp((visualSize.X / 2) + 0.45, 0.95, 3.2)
 			esp.HealthBillboard.Adornee = root
-			esp.HealthBillboard.StudsOffset = Vector3.new(math.clamp((visualSize.X / 2) + 0.65, 1.4, 4), math.clamp(visualSize.Y * 0.08, 0, 1), 0)
-			esp.HealthBillboard.Size = UDim2.fromOffset(math.clamp(CONFIG.WorldTextSize * 0.72, 7, 12), math.clamp(visualSize.Y * 9, 34, 78))
+			esp.HealthBillboard.StudsOffset = Vector3.new(sideOffset, 0, 0)
+			esp.HealthBillboard.Size = UDim2.fromScale(barWidth, barHeight)
 			esp.HealthBillboard.Enabled = true
 			esp.HealthFill.Size = UDim2.fromScale(1, math.clamp(healthPercent, 0, 1))
 			esp.HealthFill.BackgroundColor3 = getHealthBarColor(healthPercent)
@@ -5136,6 +5347,7 @@ refreshWorldESP = function(force)
 			esp.Highlight.Enabled = false
 			esp.Billboard.Enabled = false
 			esp.HealthBillboard.Enabled = false
+			esp.WeaponBillboard.Enabled = false
 			esp.Tracer.Visible = false
 			esp.WorldVisible = false
 		end
@@ -5448,11 +5660,11 @@ refreshOreESP = function(force)
 		local textParts = {}
 
 		if CONFIG.OreName then
-			table.insert(textParts, entry.Group)
+			textParts[#textParts + 1] = entry.Group
 		end
 
 		if CONFIG.OreDistance then
-			table.insert(textParts, tostring(math.floor(distance)) .. " studs")
+			textParts[#textParts + 1] = tostring(math.floor(distance)) .. " studs"
 		end
 
 		esp.Highlight.FillColor = color
@@ -6467,7 +6679,7 @@ function setVisualTarget(target)
 		local textParts = {}
 
 		if CONFIG.TargetName then
-			table.insert(textParts, target.Name)
+			textParts[#textParts + 1] = target.Name
 		end
 
 		if CONFIG.TargetDistance and target.Position then
@@ -6476,7 +6688,7 @@ function setVisualTarget(target)
 			local fromPosition = characterRoot and characterRoot.Position or Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame.Position
 
 			if fromPosition then
-				table.insert(textParts, tostring(math.floor((target.Position - fromPosition).Magnitude)) .. " studs")
+				textParts[#textParts + 1] = tostring(math.floor((target.Position - fromPosition).Magnitude)) .. " studs"
 			end
 		end
 
@@ -6639,7 +6851,7 @@ function getBestTarget(origin)
 			or (math.abs(score - bestScore) < 0.001 and math.abs(cursorDistance - bestCursorDistance) < 0.001 and targetDistance < bestTargetDistance)
 
 		if betterScore then
-			local nameOk, displayName = pcall(getTargetDisplayName, model)
+			local nameOk, displayName = pcall(getTargetDisplayName, model, modelGroup)
 			bestScore = score
 			bestCursorDistance = cursorDistance
 			bestTargetDistance = targetDistance
@@ -7047,6 +7259,7 @@ RunService:BindToRenderStep("SoftAimLocalAssist", Enum.RenderPriority.Last.Value
 		or CONFIG.WorldTracers
 		or CONFIG.WorldName
 		or CONFIG.WorldDistance
+		or CONFIG.WorldPlayerWeapon
 		or CONFIG.WorldShowHealth
 		or CONFIG.ZayHorse
 		or CONFIG.ZayMode
