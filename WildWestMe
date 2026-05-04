@@ -1,9 +1,3 @@
--- LocalScript for your own Roblox experience.
--- Put this in StarterPlayerScripts.
---
--- This does not move the camera. It uses your WORKSPACE_Entities target layout
--- and rewrites ProjectileHandler directions the same way as your original script.
-
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
