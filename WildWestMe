@@ -91,7 +91,6 @@ local CONFIG = {
 	WorldDistance = true,
 	WorldPlayerWeapon = true,
 	WorldShowHealth = true,
-	WorldPlayerHealth = false,
 	WorldAnimalHealth = true,
 	WorldHorseHealth = true,
 	WorldNPCHealth = false,
@@ -1378,6 +1377,17 @@ settingsRightPane.Visible = false
 settingsRightPane.ZIndex = 11
 settingsRightPane.Parent = body
 
+local cashLabel = Instance.new("TextLabel")
+cashLabel.Size = UDim2.new(1, -10, 0, 20)
+cashLabel.BackgroundTransparency = 1
+cashLabel.Text = "Cash: $0"
+cashLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+cashLabel.Font = Enum.Font.GothamBold
+cashLabel.TextSize = 13
+cashLabel.TextXAlignment = Enum.TextXAlignment.Left
+cashLabel.LayoutOrder = 999
+cashLabel.Parent = lootRightPane
+
 local settingsRightLayout = Instance.new("UIListLayout")
 settingsRightLayout.Padding = UDim.new(0, 10)
 settingsRightLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -1926,6 +1936,7 @@ local function makeSlider(parent, labelText, minValue, maxValue, defaultValue, o
 	return setValue
 end
 
+local cashLabel
 local setFovSlider
 local setHitChanceSlider
 local setMaxTargetDistanceSlider
@@ -1940,7 +1951,7 @@ setWorldClockTimeSlider = nil
 
 local aimControlsSection = makeSection(leftPane, "Aim Controls", 1, 5)
 local targetFilterSection = makeSection(leftPane, "Target Filters", 2, 3)
-local viewEspSection = makeSection(worldLeftPane, "ESP Settings", 1, 9)
+local viewEspSection = makeSection(worldLeftPane, "ESP Settings", 1, 8)
 itemSection = makeSection(worldLeftPane, "Item ESP", 2, 1)
 oreSection = makeSection(worldLeftPane, "Ore ESP", 3, 6)
 lootControlsSection = makeSection(lootLeftPane, "Loot ESP", 1, 2)
@@ -2238,7 +2249,6 @@ local worldNameButton = makeToggleButton(viewEspSection, "Name", 7)
 local worldDistanceButton = makeToggleButton(viewEspSection, "Distance", 8)
 local worldPlayerWeaponButton = makeToggleButton(viewEspSection, "Player Weapon", 9)
 local worldShowHealthButton = makeToggleButton(viewEspSection, "Show Health", 10)
-local worldPlayerHPButton = makeToggleButton(viewEspSection, "Player HP", 11)
 local worldAnimalHPButton = makeToggleButton(viewEspSection, "Animal HP", 12)
 local worldHorseHPButton = makeToggleButton(viewEspSection, "Horse HP", 13)
 local worldHealthModeButton = makeButton(viewEspSection, "", 14)
@@ -2253,6 +2263,7 @@ robberyPopupButton = makeToggleButton(lootControlsSection, "Robbery Popup", 4)
 bankStatusButton = makeButton(lootBankSection, "Bank: --", 1)
 bankGoldButton = makeButton(lootBankSection, "Gold Bars: --", 2)
 bankDiamondButton = makeButton(lootBankSection, "Diamonds: --", 3)
+bankCashButton = makeButton(lootBankSection, "Cash: $0", 4)
 boatStatusButton = makeButton(lootOtherSection, "Swamp Boat: --", 1)
 trainStatusButton = makeButton(lootOtherSection, "Train: --", 2)
 oreEnabledButton = makeToggleButton(oreSection, "Ore ESP", 1)
@@ -2394,6 +2405,7 @@ americanServersButton = makeToggleButton(settingsMenuSection, "American servers"
 boostFPSButton = makeToggleButton(settingsMenuSection, "Boost FPS", 7)
 dragonIRLButton = makeToggleButton(settingsMenuSection, "Dragon IRL", 8)
 freeBallButton = makeToggleButton(settingsMenuSection, "Free Ball", 9)
+local sitButton = makeButton(settingsMenuSection, "Sit", 10)
 
 creditsLabel = Instance.new("TextLabel")
 creditsLabel.Size = UDim2.new(1, 0, 0, 44)
@@ -2531,7 +2543,6 @@ local function refreshGui()
 	setToggleDisplay(worldDistanceButton, "Distance", CONFIG.WorldDistance)
 	setToggleDisplay(worldPlayerWeaponButton, "Player Weapon", CONFIG.WorldPlayerWeapon)
 	setToggleDisplay(worldShowHealthButton, "Show Health", CONFIG.WorldShowHealth)
-	setToggleDisplay(worldPlayerHPButton, "Player HP", CONFIG.WorldPlayerHealth)
 	setToggleDisplay(worldAnimalHPButton, "Animal HP", CONFIG.WorldAnimalHealth)
 	setToggleDisplay(worldHorseHPButton, "Horse HP", CONFIG.WorldHorseHealth)
 	worldHealthModeButton.Text = "HP Mode: " .. CONFIG.WorldHealthMode
@@ -3164,14 +3175,6 @@ worldShowHealthButton.MouseButton1Click:Connect(function()
 	refreshGui()
 end)
 
-worldPlayerHPButton.MouseButton1Click:Connect(function()
-	CONFIG.WorldPlayerHealth = not CONFIG.WorldPlayerHealth
-	if refreshWorldESP then
-		refreshWorldESP(true)
-	end
-	refreshGui()
-end)
-
 worldAnimalHPButton.MouseButton1Click:Connect(function()
 	CONFIG.WorldAnimalHealth = not CONFIG.WorldAnimalHealth
 	if refreshWorldESP then
@@ -3361,6 +3364,22 @@ freeBallButton.MouseButton1Click:Connect(function()
 	CONFIG.FreeBall = not CONFIG.FreeBall
 	applyFreeBall()
 	refreshGui()
+end)
+
+sitButton.MouseButton1Click:Connect(function()
+	local entities = workspace:FindFirstChild("WORKSPACE_Entities")
+	if not entities then return end
+
+	local playersFolder = entities:FindFirstChild("Players")
+	if not playersFolder then return end
+
+	local myEntity = playersFolder:FindFirstChild(localPlayer.Name)
+	if not myEntity then return end
+
+	local humanoid = myEntity:FindFirstChild("Humanoid")
+	if humanoid then
+		humanoid.Sit = true
+	end
 end)
 
 softAimKeyButton.MouseButton1Click:Connect(function()
@@ -6170,9 +6189,14 @@ end
 function getBankSnapshot()
 	local bankBase, vaultEntrance, goldBars, safe1, safe2 = getBankParts()
 	local goldCount = countBankGoldBars(goldBars)
+	local cashValue = goldCount * 200
 	local diamondCount = countSafeDiamonds(safe1) + countSafeDiamonds(safe2)
 	local vaultOpen = getBoolProperty(vaultEntrance, "Open") == true
 	local status = "Closed"
+
+	if cashLabel then
+		cashLabel.Text = "Cash: $" .. tostring(cashValue)
+	end
 
 	if vaultOpen and goldCount > 0 then
 		status = "In Progress"
@@ -6188,6 +6212,7 @@ function getBankSnapshot()
 		Color = getStatusColor(status),
 		GoldBars = goldCount,
 		Diamonds = diamondCount,
+		Cash = cashValue,
 		Location = vaultEntrance or goldBars or bankBase
 	}
 end
@@ -6421,6 +6446,13 @@ function updateLootStatusUi()
 	setStatusButton(bankStatusButton, "Bank: " .. bank.Status, bank.Color)
 	setStatusButton(bankGoldButton, "Gold Bars: " .. tostring(bank.GoldBars or 0), CONFIG.LootGoldColor)
 	setStatusButton(bankDiamondButton, "Diamonds: " .. tostring(bank.Diamonds or 0), CONFIG.LootDiamondColor)
+
+	setStatusButton(
+		bankCashButton,
+		"Cash: $" .. tostring(bank.Cash or 0),
+		Color3.fromRGB(0, 255, 100)
+	)
+
 	setStatusButton(boatStatusButton, "Swamp Boat: " .. boat.Status, boat.Color)
 	setStatusButton(trainStatusButton, "Train: " .. train.Status, train.Color)
 end
