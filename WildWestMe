@@ -61,7 +61,7 @@ local CONFIG = {
 	WorldAnimalColor = Color3.fromRGB(60, 255, 85),
 	WorldNPCColor = Color3.fromRGB(175, 70, 255),
 
-	FOVAlignment = "Mouse", -- "Mouse" or "Screen"
+	FOVAlignment = "Screen", -- "Mouse" or "Screen"
 	TargetMode = "Closest To Cursor", -- "Closest To Cursor" or "Closest To Player"
 	MaxTargetDistance = 400, -- slider supports 0-10000, 0 means unlimited
 	HitChance = 100,
