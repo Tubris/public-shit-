@@ -68,7 +68,7 @@ local CONFIG = {
 	TargetWallCheck = true,
 	HitPart = "Head", -- "Head", "Torso", "Feet", or "Random"
 	SoftAimYOffset = 0, -- slider value, divided by 100 studs
-	NPCSoftAimResolver = 150, -- extra NPC-only Y resolver, divided by 100 studs
+	NPCSoftAimResolver = 180, -- extra NPC-only Y resolver, divided by 100 studs
 	ActivationMode = "Right Click", -- "Always", "Left Click", "Right Click", or "Left Or Right"
 
 	MenuKey = Enum.KeyCode.RightShift,
