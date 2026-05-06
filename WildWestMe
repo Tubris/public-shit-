@@ -67,7 +67,7 @@ local CONFIG = {
 	HitChance = 100,
 	TargetWallCheck = true,
 	HitPart = "Head", -- "Head", "Torso", "Feet", or "Random"
-	SoftAimYOffset = 20, -- slider value, divided by 100 studs
+	SoftAimYOffset = 0, -- slider value, divided by 100 studs
 	NPCSoftAimResolver = 150, -- extra NPC-only Y resolver, divided by 100 studs
 	ActivationMode = "Right Click", -- "Always", "Left Click", "Right Click", or "Left Or Right"
 
@@ -79,7 +79,7 @@ local CONFIG = {
 	TargetTextSize = 12,
 	FullBright = false,
 	CameraFOVEnabled = true,
-	CameraFOV = 105,
+	CameraFOV = 120,
 
 	WorldEnabled = true,
 	WorldPlayers = true,
