@@ -83,7 +83,7 @@ local CONFIG = {
 
 	WorldEnabled = true,
 	WorldPlayers = true,
-	WorldAnimals = true,
+	WorldAnimals = false,
 	WorldNPCs = false,
 	WorldChams = true,
 	WorldTracers = false,
@@ -91,7 +91,7 @@ local CONFIG = {
 	WorldDistance = true,
 	WorldPlayerWeapon = true,
 	WorldShowHealth = true,
-	WorldAnimalHealth = true,
+	WorldAnimalHealth = false,
 	WorldHorseHealth = true,
 	WorldNPCHealth = false,
 	WorldHealthMode = "Bar",
