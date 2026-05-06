@@ -50,9 +50,9 @@ local CONFIG = {
 	Animals = true,
 	NPCs = true,
 
-	FOV = 350,
+	FOV = 600,
 	MinFOV = 0,
-	MaxFOV = 500,
+	MaxFOV = 750,
 	ShowFOV = false,
 	FOVColor = Color3.fromRGB(186, 104, 255),
 	TargetColor = Color3.fromRGB(255, 0, 0),
