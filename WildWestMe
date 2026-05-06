@@ -50,7 +50,7 @@ local CONFIG = {
 	Animals = true,
 	NPCs = true,
 
-	FOV = 250,
+	FOV = 200,
 	MinFOV = 0,
 	MaxFOV = 750,
 	ShowFOV = false,
@@ -68,7 +68,7 @@ local CONFIG = {
 	TargetWallCheck = true,
 	HitPart = "Head", -- "Head", "Torso", "Feet", or "Random"
 	SoftAimYOffset = 0, -- slider value, divided by 100 studs
-	NPCSoftAimResolver = 180, -- extra NPC-only Y resolver, divided by 100 studs
+	NPCSoftAimResolver = 140, -- extra NPC-only Y resolver, divided by 100 studs
 	ActivationMode = "Right Click", -- "Always", "Left Click", "Right Click", or "Left Or Right"
 
 	MenuKey = Enum.KeyCode.RightShift,
@@ -614,6 +614,45 @@ function optimizeBoostInstance(instance)
 	end
 end
 
+local boostFpsLeavesState = {}
+
+local function hideTreeLeavesForBoost()
+	local geometry = Workspace:FindFirstChild("WORKSPACE_Geometry")
+	if not geometry then return end
+
+	for _, region in ipairs(geometry:GetChildren()) do
+		if region:IsA("Folder") and region.Name:match("^REGION_") then
+			local treesFolder = region:FindFirstChild("Trees")
+
+			if treesFolder then
+				for _, treeModel in ipairs(treesFolder:GetChildren()) do
+					if treeModel:IsA("Model") then
+						local leaves = treeModel:FindFirstChild("Leaves", true)
+
+						if leaves and leaves:IsA("MeshPart") and leaves.Parent then
+							if not boostFpsLeavesState[leaves] then
+								boostFpsLeavesState[leaves] = leaves.Parent
+							end
+
+							leaves.Parent = nil
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+local function restoreTreeLeavesForBoost()
+	for leaves, oldParent in pairs(boostFpsLeavesState) do
+		if leaves and oldParent then
+			leaves.Parent = oldParent
+		end
+	end
+
+	boostFpsLeavesState = {}
+end
+
 function optimizeVegetationForBoost()
 	-- Only bushes get hidden. Trees/grass/foliage cards stay untouched.
 end
@@ -643,7 +682,9 @@ function applyBoostFPS()
 				GlobalShadows = Lighting.GlobalShadows,
 				EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
 				EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
-				ShadowSoftness = Lighting.ShadowSoftness
+				ShadowSoftness = Lighting.ShadowSoftness,
+				FogStart = Lighting.FogStart,
+				FogEnd = Lighting.FogEnd
 			}
 		end
 
@@ -651,14 +692,47 @@ function applyBoostFPS()
 		Lighting.EnvironmentDiffuseScale = 0
 		Lighting.EnvironmentSpecularScale = 0
 		Lighting.ShadowSoftness = 0
-		pcall(function()
-			local terrain = Workspace:FindFirstChildOfClass("Terrain")
-			if terrain and boostFpsLightingState.TerrainDecoration == nil then
-				boostFpsLightingState.Terrain = terrain
-				boostFpsLightingState.TerrainDecoration = terrain.Decoration
-				terrain.Decoration = false
+
+		-- clear fog
+		Lighting.FogStart = 0
+		Lighting.FogEnd = 100000
+
+		for _, descendant in ipairs(Lighting:GetDescendants()) do
+			if descendant:IsA("Atmosphere") then
+				if not atmosphereState[descendant] then
+					atmosphereState[descendant] = {
+						Density = descendant.Density,
+						Haze = descendant.Haze,
+						Glare = descendant.Glare
+					}
+				end
+
+				descendant.Density = 0
+				descendant.Haze = 0
+				descendant.Glare = 0
 			end
-		end)
+		end
+
+		-- clear clouds
+		local terrain = Workspace:FindFirstChildOfClass("Terrain")
+		if terrain then
+			for _, child in ipairs(terrain:GetChildren()) do
+				if child:IsA("Clouds") then
+					if not cloudState[child] then
+						cloudState[child] = {
+							Cover = child.Cover,
+							Density = child.Density
+						}
+					end
+
+					child.Cover = 0
+					child.Density = 0
+				end
+			end
+		end
+
+		-- remove tree leaves
+		hideTreeLeavesForBoost()
 
 		for _, descendant in ipairs(Workspace:GetDescendants()) do
 			optimizeBoostInstance(descendant)
@@ -679,6 +753,14 @@ function applyBoostFPS()
 					if not unloaded and CONFIG.BoostFPS then
 						optimizeBoostInstance(descendant)
 						optimizeLocalCharacterForBoost()
+
+						if descendant.Name == "Leaves" and descendant:IsA("MeshPart") and descendant.Parent then
+							if not boostFpsLeavesState[descendant] then
+								boostFpsLeavesState[descendant] = descendant.Parent
+							end
+
+							descendant.Parent = nil
+						end
 					end
 				end)
 			end)
@@ -695,16 +777,35 @@ function applyBoostFPS()
 
 		boostFpsState = {}
 
+		restoreTreeLeavesForBoost()
+
+		for atmosphere, defaults in pairs(atmosphereState) do
+			if atmosphere and atmosphere.Parent then
+				atmosphere.Density = defaults.Density
+				atmosphere.Haze = defaults.Haze
+				atmosphere.Glare = defaults.Glare
+			end
+		end
+
+		atmosphereState = {}
+
+		for cloud, defaults in pairs(cloudState) do
+			if cloud and cloud.Parent then
+				cloud.Cover = defaults.Cover
+				cloud.Density = defaults.Density
+			end
+		end
+
+		cloudState = {}
+
 		if boostFpsLightingState then
 			Lighting.GlobalShadows = boostFpsLightingState.GlobalShadows
 			Lighting.EnvironmentDiffuseScale = boostFpsLightingState.EnvironmentDiffuseScale
 			Lighting.EnvironmentSpecularScale = boostFpsLightingState.EnvironmentSpecularScale
 			Lighting.ShadowSoftness = boostFpsLightingState.ShadowSoftness
-			pcall(function()
-				if boostFpsLightingState.Terrain and boostFpsLightingState.TerrainDecoration ~= nil then
-					boostFpsLightingState.Terrain.Decoration = boostFpsLightingState.TerrainDecoration
-				end
-			end)
+			Lighting.FogStart = boostFpsLightingState.FogStart
+			Lighting.FogEnd = boostFpsLightingState.FogEnd
+
 			boostFpsLightingState = nil
 		end
 
