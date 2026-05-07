@@ -50,7 +50,7 @@ local CONFIG = {
 	Animals = true,
 	NPCs = true,
 
-	FOV = 200,
+	FOV = 350,
 	MinFOV = 0,
 	MaxFOV = 750,
 	ShowFOV = false,
@@ -79,7 +79,7 @@ local CONFIG = {
 	TargetTextSize = 12,
 	FullBright = false,
 	CameraFOVEnabled = true,
-	CameraFOV = 120,
+	CameraFOV = 85,
 
 	WorldEnabled = true,
 	WorldPlayers = true,
