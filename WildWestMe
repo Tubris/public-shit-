@@ -79,7 +79,7 @@ local CONFIG = {
 	TargetTextSize = 12,
 	FullBright = false,
 	CameraFOVEnabled = true,
-	CameraFOV = 85,
+	CameraFOV = 92,
 
 	WorldEnabled = true,
 	WorldPlayers = true,
