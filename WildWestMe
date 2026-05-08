@@ -50,7 +50,7 @@ local CONFIG = {
 	Animals = true,
 	NPCs = true,
 
-	FOV = 350,
+	FOV = 250,
 	MinFOV = 0,
 	MaxFOV = 750,
 	ShowFOV = false,
@@ -239,6 +239,7 @@ lastWorldInvalidation = 0
 lastItemInvalidation = 0
 oreEspObjects = {}
 oreCandidates = {}
+oreMaxCountCache = setmetatable({}, { __mode = "k" })
 lastOreCandidateRefresh = 0
 lastOreESPUpdate = 0
 refreshOreESP = nil
@@ -247,6 +248,11 @@ itemEspObjects = {}
 lastItemESPUpdate = 0
 refreshItemESP = nil
 clearItemESP = nil
+thunderTreeEspObjects = {}
+thunderTreeNotified = setmetatable({}, { __mode = "k" })
+lastThunderTreeESPUpdate = 0
+refreshThunderTreeESP = nil
+clearThunderTreeESP = nil
 lootSnapshot = {}
 robberyStatusCache = {}
 robberyPopupContainer = nil
@@ -277,6 +283,7 @@ playerLoadoutItemCache = setmetatable({}, { __mode = "k" })
 worldTracersWereVisible = false
 lastZayWorldUpdate = 0
 lastLocalMorphUpdate = 0
+lastESPChamRepair = 0
 zaySelfOriginals = setmetatable({}, { __mode = "k" })
 dragonOriginals = setmetatable({}, { __mode = "k" })
 freeBallOriginals = setmetatable({}, { __mode = "k" })
@@ -1037,6 +1044,15 @@ robberyPopupLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 robberyPopupLayout.SortOrder = Enum.SortOrder.LayoutOrder
 robberyPopupLayout.Parent = robberyPopupContainer
 
+local panel = nil
+local toggleButton = nil
+
+local function getLeftMiddlePanelPosition()
+	local camera = Workspace.CurrentCamera
+	local viewportY = camera and camera.ViewportSize.Y or 720
+	return UDim2.fromOffset(30, math.max(20, math.floor((viewportY - 430) / 2)))
+end
+
 local loadingFrame = Instance.new("Frame")
 loadingFrame.Name = "TubzSoftaimLoading"
 loadingFrame.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1089,6 +1105,15 @@ task.delay(1.1, function()
 		if loadingFrame then
 			loadingFrame:Destroy()
 		end
+
+		if not unloaded and panel and panel.Parent then
+			panel.Position = getLeftMiddlePanelPosition()
+			panel.Visible = true
+		end
+
+		if not unloaded and toggleButton and toggleButton.Parent then
+			toggleButton.Visible = true
+		end
 	end)
 end)
 
@@ -1114,13 +1139,14 @@ fovStroke.Parent = fovCircle
 local expandedPanelSize = UDim2.fromOffset(720, 430)
 local minimizedPanelSize = UDim2.fromOffset(720, 58)
 
-local panel = Instance.new("Frame")
+panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Size = expandedPanelSize
-panel.Position = UDim2.fromOffset(30, 70)
+panel.Position = getLeftMiddlePanelPosition()
 panel.BackgroundColor3 = Color3.fromRGB(10, 11, 14)
 panel.BorderSizePixel = 0
 panel.ClipsDescendants = true
+panel.Visible = false
 panel.ZIndex = 10
 panel.Parent = screenGui
 makeCorner(panel, 12)
@@ -1271,7 +1297,7 @@ settingsTabButton.Parent = topBar
 makeCorner(settingsTabButton, 8)
 makeStroke(settingsTabButton, Color3.fromRGB(60, 64, 80), 1, 0.42)
 
-local toggleButton = Instance.new("TextButton")
+toggleButton = Instance.new("TextButton")
 toggleButton.Name = "QuickToggle"
 toggleButton.Size = UDim2.fromOffset(46, 30)
 toggleButton.Position = UDim2.fromOffset(12, 12)
@@ -1282,6 +1308,7 @@ toggleButton.TextColor3 = Color3.fromRGB(235, 238, 248)
 toggleButton.Font = Enum.Font.GothamBold
 toggleButton.TextSize = 13
 toggleButton.AutoButtonColor = false
+toggleButton.Visible = false
 toggleButton.ZIndex = 40
 toggleButton.Parent = screenGui
 makeCorner(toggleButton, 9)
@@ -1477,17 +1504,6 @@ settingsRightPane.CanvasSize = UDim2.fromOffset(0, 0)
 settingsRightPane.Visible = false
 settingsRightPane.ZIndex = 11
 settingsRightPane.Parent = body
-
-local cashLabel = Instance.new("TextLabel")
-cashLabel.Size = UDim2.new(1, -10, 0, 20)
-cashLabel.BackgroundTransparency = 1
-cashLabel.Text = "Cash: $0"
-cashLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
-cashLabel.Font = Enum.Font.GothamBold
-cashLabel.TextSize = 13
-cashLabel.TextXAlignment = Enum.TextXAlignment.Left
-cashLabel.LayoutOrder = 999
-cashLabel.Parent = lootRightPane
 
 local settingsRightLayout = Instance.new("UIListLayout")
 settingsRightLayout.Padding = UDim.new(0, 10)
@@ -2037,7 +2053,6 @@ local function makeSlider(parent, labelText, minValue, maxValue, defaultValue, o
 	return setValue
 end
 
-local cashLabel
 local setFovSlider
 local setHitChanceSlider
 local setMaxTargetDistanceSlider
@@ -3468,16 +3483,8 @@ freeBallButton.MouseButton1Click:Connect(function()
 end)
 
 sitButton.MouseButton1Click:Connect(function()
-	local entities = workspace:FindFirstChild("WORKSPACE_Entities")
-	if not entities then return end
-
-	local playersFolder = entities:FindFirstChild("Players")
-	if not playersFolder then return end
-
-	local myEntity = playersFolder:FindFirstChild(localPlayer.Name)
-	if not myEntity then return end
-
-	local humanoid = myEntity:FindFirstChild("Humanoid")
+	local myEntity = getLocalEntityModel()
+	local humanoid = myEntity and (myEntity:FindFirstChild("Humanoid") or myEntity:FindFirstChildWhichIsA("Humanoid", true))
 	if humanoid then
 		humanoid.Sit = true
 	end
@@ -4238,10 +4245,6 @@ function getTargetDisplayName(model, groupName)
 
 	local player = getPlayerForModel(model)
 	if player then
-		if player.DisplayName and player.DisplayName ~= "" then
-			return player.DisplayName
-		end
-
 		return player.Name
 	end
 
@@ -4712,7 +4715,7 @@ function isWorldHealthEnabled(groupName, horseModel)
 	end
 
 	if groupName == "Player" then
-		return CONFIG.WorldPlayerHealth
+		return false
 	elseif groupName == "Animal" then
 		if horseModel then
 			return CONFIG.WorldHorseHealth
@@ -5064,7 +5067,9 @@ function reassertWorldESPHighlight(model, groupName)
 		end
 
 		esp.Highlight.Adornee = stableModel
-		esp.Highlight.Enabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or (esp.OwnHorse and CONFIG.ZayHorse))
+		esp.WorldAdornee = stableModel
+		esp.ChamsEnabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or (esp.OwnHorse and CONFIG.ZayHorse))
+		esp.Highlight.Enabled = esp.ChamsEnabled
 		lastWorldESPUpdate = 0
 		if refreshWorldESP then
 			refreshWorldESP(true)
@@ -5094,8 +5099,10 @@ function shouldKeepAnimalESPWarm(model, esp, fromPosition)
 	end
 
 	if esp.Highlight then
+		esp.ChamsEnabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or (esp.OwnHorse and CONFIG.ZayHorse))
+		esp.WorldAdornee = model
 		esp.Highlight.Adornee = model
-		esp.Highlight.Enabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or (esp.OwnHorse and CONFIG.ZayHorse))
+		esp.Highlight.Enabled = esp.ChamsEnabled
 	end
 
 	esp.WorldVisible = true
@@ -5315,6 +5322,7 @@ refreshWorldESP = function(force)
 			esp.WeaponBillboard.Enabled = false
 			esp.Tracer.Visible = false
 			esp.WorldVisible = false
+			esp.ChamsEnabled = false
 		end
 
 		return
@@ -5412,7 +5420,9 @@ refreshWorldESP = function(force)
 		esp.Highlight.OutlineTransparency = ownHorse and CONFIG.ZayHorse and 0 or 0.18
 		esp.Highlight.DepthMode = ownHorse and CONFIG.ZayHorse and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.AlwaysOnTop
 		esp.Highlight.Adornee = model
-		esp.Highlight.Enabled = (CONFIG.WorldChams and normalAnimalVisible) or (ownHorse and CONFIG.ZayHorse)
+		esp.ChamsEnabled = (CONFIG.WorldChams and normalAnimalVisible) or (ownHorse and CONFIG.ZayHorse)
+		esp.WorldAdornee = model
+		esp.Highlight.Enabled = esp.ChamsEnabled
 
 		esp.Billboard.Adornee = root
 		esp.Billboard.Enabled = showText
@@ -5470,6 +5480,7 @@ refreshWorldESP = function(force)
 			esp.WeaponBillboard.Enabled = false
 			esp.Tracer.Visible = false
 			esp.WorldVisible = false
+			esp.ChamsEnabled = false
 		end
 	end
 end
@@ -5628,6 +5639,48 @@ function getOrePositionAndAdornee(instance)
 	return nil, nil
 end
 
+function getOreRemainingInfo(instance)
+	if not instance or not instance.Parent then
+		return nil, nil
+	end
+
+	local depositInfo = instance:FindFirstChild("DepositInfo")
+	if not depositInfo then
+		depositInfo = instance:FindFirstChild("DepositInfo", true)
+	end
+
+	local oreRemaining = depositInfo and depositInfo:FindFirstChild("OreRemaining")
+	if not oreRemaining then
+		return nil, nil
+	end
+
+	local ok, value = pcall(function()
+		return oreRemaining.Value
+	end)
+	local current = ok and tonumber(value) or nil
+	if current == nil then
+		return nil, nil
+	end
+
+	local maximum = oreMaxCountCache[instance]
+	if not maximum then
+		for _, statName in ipairs({ "MaxOre", "OreMax", "MaxOreRemaining", "OreCapacity", "Capacity" }) do
+			maximum = tonumber(depositInfo:GetAttribute(statName)) or tonumber(instance:GetAttribute(statName))
+			if maximum then
+				break
+			end
+		end
+	end
+
+	maximum = maximum or current
+	if current > maximum then
+		maximum = current
+	end
+
+	oreMaxCountCache[instance] = maximum
+	return math.max(0, math.floor(current + 0.5)), math.max(0, math.floor(maximum + 0.5))
+end
+
 function addOreCandidate(instance, groupName, seen)
 	if not instance or not instance.Parent or seen[instance] then
 		return
@@ -5680,6 +5733,7 @@ function makeOreESPObject(instance)
 	highlight.Name = "TubzOreESPHighlight"
 	highlight.FillTransparency = 0.78
 	highlight.OutlineTransparency = 0.16
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	highlight.Enabled = false
 	highlight.Adornee = adornee
 	highlight.Parent = screenGui
@@ -5739,6 +5793,8 @@ refreshOreESP = function(force)
 		for _, esp in pairs(oreEspObjects) do
 			esp.Highlight.Enabled = false
 			esp.Billboard.Enabled = false
+			esp.OreVisible = false
+			esp.ChamsEnabled = false
 		end
 
 		return
@@ -5776,11 +5832,22 @@ refreshOreESP = function(force)
 
 		local esp = oreEspObjects[instance] or makeOreESPObject(instance)
 		local color = CONFIG.OreColors[entry.Group] or Color3.fromRGB(255, 255, 255)
-		local showText = CONFIG.OreName or CONFIG.OreDistance
+		local oreRemaining, oreMaximum = getOreRemainingInfo(instance)
+		local depleted = oreRemaining ~= nil and oreRemaining <= 0
+		local textColor = depleted and Color3.fromRGB(255, 65, 65) or color
+		local showText = CONFIG.OreName or CONFIG.OreDistance or oreRemaining ~= nil
 		local textParts = {}
 
 		if CONFIG.OreName then
 			textParts[#textParts + 1] = entry.Group
+		end
+
+		if oreRemaining ~= nil then
+			if depleted then
+				textParts[#textParts + 1] = "Empty"
+			else
+				textParts[#textParts + 1] = tostring(oreRemaining) .. "/" .. tostring(math.max(oreMaximum or oreRemaining, oreRemaining))
+			end
 		end
 
 		if CONFIG.OreDistance then
@@ -5794,15 +5861,73 @@ refreshOreESP = function(force)
 
 		esp.Billboard.Adornee = adornee
 		esp.Billboard.Enabled = showText and adornee ~= nil and (adornee:IsA("BasePart") or adornee:IsA("Attachment"))
-		esp.Label.TextColor3 = color
+		esp.Label.TextColor3 = textColor
 		esp.Label.TextSize = CONFIG.WorldTextSize
 		esp.Label.Text = table.concat(textParts, " | ")
+		esp.OreVisible = true
+		esp.OreAdornee = adornee
+		esp.ChamsEnabled = CONFIG.OreChams and adornee ~= nil
 	end
 
 	for instance, esp in pairs(oreEspObjects) do
 		if not visibleOre[instance] then
 			esp.Highlight.Enabled = false
 			esp.Billboard.Enabled = false
+			esp.OreVisible = false
+			esp.ChamsEnabled = false
+		end
+	end
+end
+
+function repairESPChams()
+	if CONFIG.WorldEnabled then
+		for model, esp in pairs(worldEspObjects) do
+			if esp.WorldVisible and esp.Highlight and esp.ChamsEnabled then
+				local adornee = esp.WorldAdornee or model
+				if adornee and adornee.Parent then
+					pcall(function()
+						if esp.Highlight.Parent ~= screenGui then
+							esp.Highlight.Parent = screenGui
+						end
+
+						esp.Highlight.Adornee = adornee
+						esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+						esp.Highlight.Enabled = true
+					end)
+				end
+			end
+		end
+	end
+
+	if CONFIG.WorldEnabled and CONFIG.OreEnabled and CONFIG.OreChams then
+		for _, esp in pairs(oreEspObjects) do
+			if esp.OreVisible and esp.Highlight and esp.ChamsEnabled and esp.OreAdornee and esp.OreAdornee.Parent then
+				pcall(function()
+					if esp.Highlight.Parent ~= screenGui then
+						esp.Highlight.Parent = screenGui
+					end
+
+					esp.Highlight.Adornee = esp.OreAdornee
+					esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+					esp.Highlight.Enabled = true
+				end)
+			end
+		end
+	end
+
+	if CONFIG.WorldEnabled then
+		for _, esp in pairs(itemEspObjects) do
+			if esp.ItemVisible and esp.Highlight and esp.ChamsEnabled and esp.ItemAdornee and esp.ItemAdornee.Parent then
+				pcall(function()
+					if esp.Highlight.Parent ~= screenGui then
+						esp.Highlight.Parent = screenGui
+					end
+
+					esp.Highlight.Adornee = esp.ItemAdornee
+					esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+					esp.Highlight.Enabled = true
+				end)
+			end
 		end
 	end
 end
@@ -6295,10 +6420,6 @@ function getBankSnapshot()
 	local vaultOpen = getBoolProperty(vaultEntrance, "Open") == true
 	local status = "Closed"
 
-	if cashLabel then
-		cashLabel.Text = "Cash: $" .. tostring(cashValue)
-	end
-
 	if vaultOpen and goldCount > 0 then
 		status = "In Progress"
 	elseif goldCount <= 0 then
@@ -6494,6 +6615,23 @@ function showRobberyPopup(title, body, color)
 	end)
 end
 
+function showThunderTreePopup(regionName, distance)
+	local oldColor = CONFIG.NotificationColor
+	local oldBackground = CONFIG.NotificationBackgroundColor
+	local oldPopup = CONFIG.RobberyPopup
+	CONFIG.NotificationColor = Color3.fromRGB(255, 245, 0)
+	CONFIG.NotificationBackgroundColor = Color3.fromRGB(45, 12, 58)
+	CONFIG.RobberyPopup = true
+	showRobberyPopup(
+		"!!! THUNDERSTRUCK TREE !!!",
+		tostring(regionName or "Unknown Region") .. " / " .. tostring(distance or 0) .. " studs",
+		Color3.fromRGB(255, 255, 0)
+	)
+	CONFIG.NotificationColor = oldColor
+	CONFIG.NotificationBackgroundColor = oldBackground
+	CONFIG.RobberyPopup = oldPopup
+end
+
 function getRobberyPopupContent(name, status)
 	if name == "Train" then
 		if status == "Ready" then
@@ -6566,6 +6704,7 @@ function makeItemESPObject(instance)
 	highlight.Name = "TubzItemESPHighlight"
 	highlight.FillTransparency = 0.8
 	highlight.OutlineTransparency = 0.12
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	highlight.Enabled = false
 	highlight.Adornee = adornee
 	highlight.Parent = screenGui
@@ -6632,7 +6771,10 @@ function updateItemESPEntry(instance, labelText, color, fromPosition, visibleIte
 	esp.Highlight.FillColor = color
 	esp.Highlight.OutlineColor = color:Lerp(Color3.fromRGB(255, 255, 255), 0.42)
 	esp.Highlight.Adornee = adornee
-	esp.Highlight.Enabled = CONFIG.WorldChams or forceChams == true
+	esp.ChamsEnabled = CONFIG.WorldChams or forceChams == true
+	esp.ItemVisible = true
+	esp.ItemAdornee = adornee
+	esp.Highlight.Enabled = esp.ChamsEnabled
 	esp.ForceChams = forceChams == true
 	esp.LastSeen = os.clock()
 
@@ -6675,6 +6817,8 @@ refreshItemESP = function(force)
 		for _, esp in pairs(itemEspObjects) do
 			esp.Highlight.Enabled = false
 			esp.Billboard.Enabled = false
+			esp.ItemVisible = false
+			esp.ChamsEnabled = false
 		end
 		return
 	end
@@ -6718,6 +6862,192 @@ refreshItemESP = function(force)
 	for instance, esp in pairs(itemEspObjects) do
 		local keepWarm = esp.ForceChams and esp.LastSeen and now - esp.LastSeen < 2
 		if not visibleItems[instance] and not keepWarm then
+			esp.Highlight.Enabled = false
+			esp.Billboard.Enabled = false
+			esp.ItemVisible = false
+			esp.ChamsEnabled = false
+		end
+	end
+end
+
+function getThunderTreeRegionName(tree)
+	local geometry = Workspace:FindFirstChild("WORKSPACE_Geometry")
+	local current = tree
+
+	while current and current ~= geometry do
+		if current.Name and string.match(current.Name, "^REGION_") then
+			return current.Name:gsub("^REGION_", "")
+		end
+
+		current = current.Parent
+	end
+
+	return "Unknown Region"
+end
+
+function hasThunderTreeStrike(tree)
+	if not tree or not tree.Parent then
+		return false
+	end
+
+	local trunk = tree:FindFirstChild("Trunk")
+	if trunk and trunk:FindFirstChild("Strike2") then
+		return true
+	end
+
+	return tree:FindFirstChild("Strike2", true) ~= nil
+end
+
+function getThunderTreeAdornee(tree)
+	if not tree or not tree.Parent then
+		return nil
+	end
+
+	if tree:IsA("BasePart") then
+		return tree
+	end
+
+	local trunk = tree:FindFirstChild("Trunk")
+	if trunk and trunk:IsA("BasePart") then
+		return trunk
+	end
+
+	return tree:FindFirstChildWhichIsA("BasePart", true)
+end
+
+function makeThunderTreeESPObject(tree)
+	local esp = {}
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "TubzThunderTreeHighlight"
+	highlight.FillTransparency = 0.62
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = false
+	highlight.Parent = screenGui
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "TubzThunderTreeName"
+	billboard.Size = UDim2.fromOffset(300, 38)
+	billboard.StudsOffset = Vector3.new(0, 6, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = false
+	billboard.MaxDistance = 1000000
+	billboard.Parent = screenGui
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Font = Enum.Font.GothamBlack
+	label.TextSize = 16
+	label.TextWrapped = false
+	label.TextTruncate = Enum.TextTruncate.None
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.08
+	label.Parent = billboard
+
+	esp.Highlight = highlight
+	esp.Billboard = billboard
+	esp.Label = label
+	thunderTreeEspObjects[tree] = esp
+	return esp
+end
+
+function updateThunderTreeColors()
+	for tree, esp in pairs(thunderTreeEspObjects) do
+		if esp.Visible and esp.Label then
+			local color = getZayColor(getZayOffset(tree))
+			esp.Label.TextColor3 = color
+			if esp.Highlight then
+				esp.Highlight.FillColor = color
+				esp.Highlight.OutlineColor = color:Lerp(Color3.fromRGB(255, 255, 255), 0.4)
+			end
+		end
+	end
+end
+
+clearThunderTreeESP = function()
+	for tree, esp in pairs(thunderTreeEspObjects) do
+		if esp.Highlight then
+			esp.Highlight:Destroy()
+		end
+
+		if esp.Billboard then
+			esp.Billboard:Destroy()
+		end
+
+		thunderTreeEspObjects[tree] = nil
+	end
+end
+
+refreshThunderTreeESP = function(force)
+	if unloaded then
+		return
+	end
+
+	local now = os.clock()
+	updateThunderTreeColors()
+	if not force and lastThunderTreeESPUpdate > 0 and now - lastThunderTreeESPUpdate < 1.5 then
+		return
+	end
+
+	lastThunderTreeESPUpdate = now
+
+	local geometry = Workspace:FindFirstChild("WORKSPACE_Geometry")
+	if not geometry then
+		for _, esp in pairs(thunderTreeEspObjects) do
+			esp.Visible = false
+			esp.Highlight.Enabled = false
+			esp.Billboard.Enabled = false
+		end
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	local character = localPlayer.Character
+	local characterRoot = character and character:FindFirstChild("HumanoidRootPart")
+	local fromPosition = characterRoot and characterRoot.Position or camera and camera.CFrame.Position
+	local visibleTrees = {}
+
+	for _, region in ipairs(geometry:GetChildren()) do
+		local treesFolder = region:FindFirstChild("Trees")
+		if treesFolder then
+			for _, tree in ipairs(treesFolder:GetChildren()) do
+				if hasThunderTreeStrike(tree) then
+					local adornee = getThunderTreeAdornee(tree)
+					if adornee then
+						local distance = fromPosition and math.floor((adornee.Position - fromPosition).Magnitude) or 0
+						local esp = thunderTreeEspObjects[tree] or makeThunderTreeESPObject(tree)
+						local color = getZayColor(getZayOffset(tree))
+
+						visibleTrees[tree] = true
+						esp.Visible = true
+						esp.Highlight.Adornee = tree:IsA("Model") and tree or adornee
+						esp.Highlight.FillColor = color
+						esp.Highlight.OutlineColor = color:Lerp(Color3.fromRGB(255, 255, 255), 0.4)
+						esp.Highlight.Enabled = true
+
+						esp.Billboard.Adornee = adornee
+						esp.Billboard.Enabled = true
+						esp.Label.TextColor3 = color
+						esp.Label.Text = "THUNDERSTRUCK / " .. tostring(distance) .. " studs"
+
+						if not thunderTreeNotified[tree] then
+							thunderTreeNotified[tree] = true
+							showThunderTreePopup(getThunderTreeRegionName(tree), distance)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	for tree, esp in pairs(thunderTreeEspObjects) do
+		if not visibleTrees[tree] then
+			esp.Visible = false
 			esp.Highlight.Enabled = false
 			esp.Billboard.Enabled = false
 		end
@@ -7288,6 +7618,10 @@ unloadScript = function()
 		clearItemESP()
 	end
 
+	if clearThunderTreeESP then
+		clearThunderTreeESP()
+	end
+
 	if fullBrightEffect then
 		fullBrightEffect:Destroy()
 		fullBrightEffect = nil
@@ -7414,12 +7748,21 @@ RunService:BindToRenderStep("SoftAimLocalAssist", Enum.RenderPriority.Last.Value
 	end
 	updateWorldTracers()
 
-	if CONFIG.WorldEnabled and CONFIG.OreEnabled and (CONFIG.OreChams or CONFIG.OreName or CONFIG.OreDistance) then
+	if CONFIG.WorldEnabled and CONFIG.OreEnabled then
 		refreshOreESP()
+	end
+
+	if now - lastESPChamRepair >= 0.25 then
+		lastESPChamRepair = now
+		repairESPChams()
 	end
 
 	if CONFIG.WorldEnabled and (CONFIG.DroppedItemESP or CONFIG.TrainESP or CONFIG.BankESP or CONFIG.BoatESP) then
 		refreshItemESP()
+	end
+
+	if refreshThunderTreeESP then
+		refreshThunderTreeESP()
 	end
 
 	local aimActive = isSoftAimActive()
