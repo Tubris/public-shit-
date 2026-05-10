@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
@@ -7,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
+local Stats = game:GetService("Stats")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -17,6 +19,10 @@ end
 
 pcall(function()
 	RunService:UnbindFromRenderStep("SoftAimLocalAssist")
+end)
+
+pcall(function()
+	ContextActionService:UnbindAction("TubzRagdollGetUpDelay")
 end)
 
 local oldGui = playerGui:FindFirstChild("SoftAimGui")
@@ -46,6 +52,8 @@ end
 
 local CONFIG = {
 	Enabled = true,
+	AntiFaction = true,
+	DeadCheck = true,
 	Players = true,
 	Animals = true,
 	NPCs = true,
@@ -67,12 +75,13 @@ local CONFIG = {
 	HitChance = 100,
 	TargetWallCheck = true,
 	HitPart = "Head", -- "Head", "Torso", "Feet", or "Random"
-	SoftAimYOffset = -20, -- slider value, divided by 100 studs
-	NPCSoftAimResolver = 130, -- extra NPC-only Y resolver, divided by 100 studs
+	SoftAimYOffset = 0, -- slider value, divided by 100 studs
+	NPCSoftAimResolver = 140, -- extra NPC-only Y resolver, divided by 100 studs
 	ActivationMode = "Right Click", -- "Always", "Left Click", "Right Click", or "Left Or Right"
 
 	MenuKey = Enum.KeyCode.RightShift,
 	SoftAimToggleKey = nil,
+	RagdollSelfKey = nil,
 	TargetChams = true,
 	TargetName = true,
 	TargetDistance = false,
@@ -90,6 +99,7 @@ local CONFIG = {
 	WorldName = true,
 	WorldDistance = true,
 	WorldPlayerWeapon = true,
+	AnimalResizer = false,
 	WorldShowHealth = true,
 	WorldAnimalHealth = false,
 	WorldHorseHealth = true,
@@ -114,7 +124,14 @@ local CONFIG = {
 	MinimumHopPlayers = 15,
 	BoostFPS = false,
 	DragonIRL = false,
+	GiantMode = false,
+	OpLasso = false,
+	MaxJump = false,
+	InfStamina = false,
+	FasterRoll = false,
+	WalkSpeed = 50,
 	FreeBall = false,
+	ClientInfoEnabled = true,
 	NotificationColor = Color3.fromRGB(178, 112, 255),
 	NotificationBackgroundColor = Color3.fromRGB(18, 14, 28),
 
@@ -197,6 +214,10 @@ local leftDown = false
 local rightDown = false
 local waitingForKeybind = false
 waitingForSoftAimKeybind = false
+waitingForRagdollKeybind = false
+ragdollModuleCache = nil
+lastRagdollSeenTime = 0
+interfaceReady = false
 local currentTarget = nil
 local randomHitCache = {}
 local unloaded = false
@@ -207,6 +228,8 @@ local clearCandidateCache
 local targetCandidates = {}
 targetCandidateGroups = setmetatable({}, { __mode = "k" })
 softAimAliveCache = setmetatable({}, { __mode = "k" })
+factionAllyCache = {}
+lastFactionAllyScan = 0
 local lastCandidateRefresh = 0
 local lastTargetScan = 0
 local lastVisualModel = nil
@@ -253,6 +276,11 @@ thunderTreeNotified = setmetatable({}, { __mode = "k" })
 lastThunderTreeESPUpdate = 0
 refreshThunderTreeESP = nil
 clearThunderTreeESP = nil
+legendaryAnimalEspObjects = {}
+legendaryAnimalNotified = setmetatable({}, { __mode = "k" })
+lastLegendaryAnimalESPUpdate = 0
+refreshLegendaryAnimalESP = nil
+clearLegendaryAnimalESP = nil
 lootSnapshot = {}
 robberyStatusCache = {}
 robberyPopupContainer = nil
@@ -284,9 +312,20 @@ worldTracersWereVisible = false
 lastZayWorldUpdate = 0
 lastLocalMorphUpdate = 0
 lastESPChamRepair = 0
+lastAnimalChamRebind = 0
 zaySelfOriginals = setmetatable({}, { __mode = "k" })
 dragonOriginals = setmetatable({}, { __mode = "k" })
+giantOriginals = setmetatable({}, { __mode = "k" })
+opLassoOriginals = setmetatable({}, { __mode = "k" })
+maxJumpOriginals = setmetatable({}, { __mode = "k" })
+staminaOriginals = setmetatable({}, { __mode = "k" })
+fasterRollOriginals = setmetatable({}, { __mode = "k" })
+walkSpeedOriginals = setmetatable({}, { __mode = "k" })
+walkSpeedSliderReady = false
 freeBallOriginals = setmetatable({}, { __mode = "k" })
+animalResizeOriginals = setmetatable({}, { __mode = "k" })
+lastAnimalResizeUpdate = 0
+lastOpLassoUpdate = 0
 ZAY_SELF_PART_NAMES = {
 	"LeftFist",
 	"LeftFoot",
@@ -354,6 +393,55 @@ local function cycle(list, current)
 	end
 
 	return list[index]
+end
+
+local function getClientPingMS()
+	local ok, value = pcall(function()
+		local network = Stats and Stats:FindFirstChild("Network")
+		local serverStats = network and network:FindFirstChild("ServerStatsItem")
+		local pingItem = serverStats and (serverStats:FindFirstChild("Data Ping") or serverStats:FindFirstChild("Ping"))
+		if not pingItem then
+			return nil
+		end
+
+		local valueString = pingItem:GetValueString()
+		local ping = tonumber(string.match(valueString or "", "%d+"))
+		if ping then
+			return ping
+		end
+
+		local rawValue = pingItem:GetValue()
+		return rawValue and math.floor(rawValue + 0.5) or nil
+	end)
+
+	return ok and value or nil
+end
+
+local function updateClientInfo(now)
+	clientInfoFrames += 1
+	if clientInfoFrame then
+		clientInfoFrame.Visible = CONFIG.ClientInfoEnabled
+	end
+
+	if not CONFIG.ClientInfoEnabled then
+		clientInfoFrames = 0
+		lastClientInfoUpdate = now
+		return
+	end
+
+	if not clientInfoText or not clientInfoText.Parent or now - lastClientInfoUpdate < 0.5 then
+		return
+	end
+
+	local elapsed = math.max(now - lastClientInfoUpdate, 0.001)
+	local fps = math.floor((clientInfoFrames / elapsed) + 0.5)
+	local ping = getClientPingMS()
+	local playerCount = #Players:GetPlayers()
+	local maxPlayers = tonumber(Players.MaxPlayers) or 0
+	local serverCount = tostring(playerCount) .. "/" .. (maxPlayers > 0 and tostring(maxPlayers) or "--")
+	clientInfoText.Text = "FPS " .. tostring(fps) .. "  |  " .. serverCount .. "  |  Ping " .. (ping and tostring(ping) or "--") .. "ms"
+	clientInfoFrames = 0
+	lastClientInfoUpdate = now
 end
 
 local function isSoftAimActive()
@@ -1028,10 +1116,41 @@ local aimBindable = Instance.new("BindableFunction")
 aimBindable.Name = "SoftAimGetDirection"
 aimBindable.Parent = playerGui
 
+clientInfoFrame = Instance.new("Frame")
+clientInfoFrame.Name = "TubzClientInfo"
+clientInfoFrame.AnchorPoint = Vector2.new(0.5, 0)
+clientInfoFrame.Position = UDim2.new(0.5, 0, 0, 7)
+clientInfoFrame.Size = UDim2.fromOffset(226, 24)
+clientInfoFrame.BackgroundColor3 = Color3.fromRGB(8, 10, 14)
+clientInfoFrame.BackgroundTransparency = 0.34
+clientInfoFrame.BorderSizePixel = 0
+clientInfoFrame.Visible = CONFIG.ClientInfoEnabled
+clientInfoFrame.ZIndex = 118
+clientInfoFrame.Parent = screenGui
+makeCorner(clientInfoFrame, 8)
+makeStroke(clientInfoFrame, Color3.fromRGB(70, 76, 92), 1, 0.58)
+
+clientInfoText = Instance.new("TextLabel")
+clientInfoText.Size = UDim2.fromScale(1, 1)
+clientInfoText.BackgroundTransparency = 1
+clientInfoText.BorderSizePixel = 0
+clientInfoText.Text = "FPS --  |  --/--  |  Ping --ms"
+clientInfoText.TextColor3 = Color3.fromRGB(188, 196, 212)
+clientInfoText.Font = Enum.Font.GothamMedium
+clientInfoText.TextSize = 11
+clientInfoText.TextTransparency = 0.08
+clientInfoText.TextXAlignment = Enum.TextXAlignment.Center
+clientInfoText.TextYAlignment = Enum.TextYAlignment.Center
+clientInfoText.ZIndex = 119
+clientInfoText.Parent = clientInfoFrame
+
+clientInfoFrames = 0
+lastClientInfoUpdate = os.clock()
+
 robberyPopupContainer = Instance.new("Frame")
 robberyPopupContainer.Name = "TubzRobberyPopups"
 robberyPopupContainer.AnchorPoint = Vector2.new(0.5, 0)
-robberyPopupContainer.Position = UDim2.new(0.5, 0, 0, 22)
+robberyPopupContainer.Position = UDim2.new(0.5, 0, 0, 42)
 robberyPopupContainer.Size = UDim2.fromOffset(380, 220)
 robberyPopupContainer.BackgroundTransparency = 1
 robberyPopupContainer.BorderSizePixel = 0
@@ -1105,6 +1224,8 @@ task.delay(1.1, function()
 		if loadingFrame then
 			loadingFrame:Destroy()
 		end
+
+		interfaceReady = true
 
 		if not unloaded and panel and panel.Parent then
 			panel.Position = getLeftMiddlePanelPosition()
@@ -1668,6 +1789,160 @@ function getLocalEntityModel()
 	return localPlayer.Character
 end
 
+function getRagdollModule()
+	if ragdollModuleCache then
+		return ragdollModuleCache
+	end
+
+	local ok, module = pcall(function()
+		local modules = ReplicatedStorage:FindFirstChild("Modules")
+		local character = modules and modules:FindFirstChild("Character")
+		local ragdolls = character and character:FindFirstChild("Ragdolls")
+		return ragdolls and require(ragdolls) or nil
+	end)
+
+	if ok and type(module) == "table" then
+		ragdollModuleCache = module
+	end
+
+	return ragdollModuleCache
+end
+
+function getRagdollCharacter()
+	local entities = Workspace:FindFirstChild("WORKSPACE_Entities")
+	local playersContainer = entities and entities:FindFirstChild("Players")
+	return (playersContainer and playersContainer:FindFirstChild(localPlayer.Name)) or getLocalEntityModel()
+end
+
+function isDeadFaceDead(model)
+	if not model then
+		return false
+	end
+
+	local entityRoot = getEntityRootModel(model, "Player") or model
+	local deadFace = entityRoot:FindFirstChild("DeadFace", true) or model:FindFirstChild("DeadFace", true)
+	if not deadFace then
+		return false
+	end
+
+	local ok, transparency = pcall(function()
+		return deadFace.Transparency
+	end)
+
+	return ok and tonumber(transparency) ~= nil and transparency >= 0.5
+end
+
+function isRagdollSelfBlockedKey(keyCode)
+	return keyCode == Enum.KeyCode.E or keyCode == Enum.KeyCode.Space
+end
+
+function clearRagdollSelfKey(keyCode)
+	return keyCode == Enum.KeyCode.Escape
+		or keyCode == Enum.KeyCode.Backspace
+		or keyCode == Enum.KeyCode.Delete
+end
+
+function tryRagdollGetUp()
+	local ragdollModule = getRagdollModule()
+	local character = getRagdollCharacter()
+	if not ragdollModule or not character then
+		return false
+	end
+
+	if isDeadFaceDead(character) then
+		return false
+	end
+
+	local ok, ragdolled = pcall(function()
+		return ragdollModule:IsRagdolledLocal(character)
+	end)
+
+	if ok and ragdolled then
+		local now = os.clock()
+		if lastRagdollSeenTime <= 0 then
+			lastRagdollSeenTime = now
+			return false
+		end
+
+		if now - lastRagdollSeenTime < 2 then
+			return false
+		end
+
+		pcall(function()
+			ragdollModule:ExitRagdoll(character)
+		end)
+		return true
+	elseif ok then
+		lastRagdollSeenTime = 0
+	end
+
+	return false
+end
+
+function handleRagdollGetUpAction(actionName, inputState, inputObject)
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+
+	local ragdollModule = getRagdollModule()
+	local character = getRagdollCharacter()
+	if not ragdollModule or not character then
+		return Enum.ContextActionResult.Pass
+	end
+
+	local ok, ragdolled = pcall(function()
+		return ragdollModule:IsRagdolledLocal(character)
+	end)
+
+	if not ok or not ragdolled then
+		local now = os.clock()
+		if lastRagdollSeenTime > 0 and now - lastRagdollSeenTime < 2 then
+			return Enum.ContextActionResult.Sink
+		end
+
+		if lastRagdollSeenTime > 0 and now - lastRagdollSeenTime >= 2 then
+			lastRagdollSeenTime = 0
+		end
+
+		return Enum.ContextActionResult.Pass
+	end
+
+	if isDeadFaceDead(character) then
+		return Enum.ContextActionResult.Sink
+	end
+
+	local now = os.clock()
+	if lastRagdollSeenTime <= 0 then
+		lastRagdollSeenTime = now
+	end
+
+	if now - lastRagdollSeenTime < 2 then
+		return Enum.ContextActionResult.Sink
+	end
+
+	tryRagdollGetUp()
+	return Enum.ContextActionResult.Sink
+end
+
+function ragdollSelf()
+	local ragdollModule = getRagdollModule()
+	local character = getRagdollCharacter()
+	if not ragdollModule or not character then
+		return
+	end
+
+	local ok, ragdolled = pcall(function()
+		return ragdollModule:IsRagdolledLocal(character)
+	end)
+
+	if ok and not ragdolled then
+		pcall(function()
+			ragdollModule:EnterRagdoll(character)
+		end)
+		lastRagdollSeenTime = os.clock()
+	end
+end
+
 function restoreZaySelfColors()
 	for part, original in pairs(zaySelfOriginals) do
 		if part and part.Parent and original then
@@ -1743,6 +2018,190 @@ function applyDragonIRL()
 	end
 end
 
+function applyGiantMode()
+	if not CONFIG.GiantMode then
+		for valueObject, oldValue in pairs(giantOriginals) do
+			if valueObject and valueObject.Parent then
+				pcall(function()
+					valueObject.Value = oldValue
+				end)
+			end
+
+			giantOriginals[valueObject] = nil
+		end
+		return
+	end
+
+	local entity = getLocalEntityModel()
+	local humanoid = entity and entity:FindFirstChild("Humanoid", true)
+	if not humanoid then
+		return
+	end
+
+	local scaleValues = {
+		BodyHeightScale = 2.5,
+		BodyDepthScale = 2.5,
+		BodyWidthScale = 2.5,
+		HeadScale = 3
+	}
+
+	for scaleName, scaleValue in pairs(scaleValues) do
+		local valueObject = humanoid:FindFirstChild(scaleName)
+		if valueObject and (valueObject:IsA("NumberValue") or valueObject:IsA("IntValue")) then
+			if giantOriginals[valueObject] == nil then
+				giantOriginals[valueObject] = valueObject.Value
+			end
+
+			valueObject.Value = scaleValue
+		end
+	end
+end
+
+function findParamPath(names)
+	local current = ReplicatedStorage
+	for _, childName in ipairs(names) do
+		if not current then
+			return nil
+		end
+
+		current = current:FindFirstChild(childName)
+	end
+
+	return current
+end
+
+function setValueWithOriginal(originals, valueObject, newValue)
+	if not valueObject then
+		return
+	end
+
+	local ok, oldValue = pcall(function()
+		return valueObject.Value
+	end)
+
+	if not ok then
+		return
+	end
+
+	if originals[valueObject] == nil then
+		originals[valueObject] = oldValue
+	end
+
+	pcall(function()
+		valueObject.Value = newValue
+	end)
+end
+
+function restoreValueOriginals(originals)
+	for valueObject, oldValue in pairs(originals) do
+		if valueObject and valueObject.Parent then
+			pcall(function()
+				valueObject.Value = oldValue
+			end)
+		end
+
+		originals[valueObject] = nil
+	end
+end
+
+function applyOpLasso()
+	if not CONFIG.OpLasso then
+		restoreValueOriginals(opLassoOriginals)
+		return
+	end
+
+	local values = {
+		LassoGravityMult = 0.1,
+		LassoMaxLength = 9999999999,
+		LassoPullerVelocity = 500
+	}
+
+	for paramName, paramValue in pairs(values) do
+		setValueWithOriginal(opLassoOriginals, findParamPath({ "Params", paramName }), paramValue)
+	end
+end
+
+function applyMaxJump()
+	if not CONFIG.MaxJump then
+		restoreValueOriginals(maxJumpOriginals)
+		return
+	end
+
+	setValueWithOriginal(maxJumpOriginals, findParamPath({ "Params", "Character", "WidthJumpMult" }), 1.5)
+
+	local entity = getLocalEntityModel()
+	local humanoid = entity and entity:FindFirstChild("Humanoid", true)
+	local bodyWidth = humanoid and humanoid:FindFirstChild("BodyWidthScale")
+	setValueWithOriginal(maxJumpOriginals, bodyWidth, 0.8)
+end
+
+function applyInfStamina()
+	if not CONFIG.InfStamina then
+		restoreValueOriginals(staminaOriginals)
+		return
+	end
+
+	setValueWithOriginal(staminaOriginals, findParamPath({ "Params", "Character", "JumpStaminaCost" }), 0)
+	setValueWithOriginal(staminaOriginals, findParamPath({ "Params", "Character", "RollStaminaCost" }), 0)
+end
+
+function applyFasterRoll()
+	if not CONFIG.FasterRoll then
+		restoreValueOriginals(fasterRollOriginals)
+		return
+	end
+
+	setValueWithOriginal(fasterRollOriginals, findParamPath({ "Params", "Character", "Roll", "Phase1", "From" }), 2)
+	setValueWithOriginal(fasterRollOriginals, findParamPath({ "Params", "Character", "Roll", "Phase1", "To" }), 1.5)
+	setValueWithOriginal(fasterRollOriginals, findParamPath({ "Params", "Character", "Roll", "Phase2", "To" }), 1.5)
+	setValueWithOriginal(fasterRollOriginals, findParamPath({ "Params", "Character", "Roll", "Stop" }), 0)
+end
+
+function getWalkSpeedParamValue()
+	local walkValue = findParamPath({ "Params", "Character", "MoveSpeed", "Walk" })
+	if not walkValue then
+		return nil
+	end
+
+	local ok, value = pcall(function()
+		return walkValue.Value
+	end)
+
+	return ok and tonumber(value) or nil
+end
+
+function getWalkSpeedSliderDefault()
+	local value = getWalkSpeedParamValue()
+	if value == nil then
+		return CONFIG.WalkSpeed
+	end
+
+	return math.clamp(math.floor((math.clamp(value, 0, 28) / 28) * 100 + 0.5), 0, 100)
+end
+
+function applyWalkSpeed()
+	local speedValue = math.clamp((CONFIG.WalkSpeed / 100) * 28, 0, 28)
+	for _, speedName in ipairs({
+		"Walk",
+		"Swim",
+		"SprintMelee",
+		"Climb",
+		"Crouch",
+		"InAir",
+		"Sprint"
+	}) do
+		setValueWithOriginal(walkSpeedOriginals, findParamPath({ "Params", "Character", "MoveSpeed", speedName }), speedValue)
+	end
+end
+
+function restoreWalkSpeedValues()
+	restoreValueOriginals(walkSpeedOriginals)
+end
+
+function formatWalkSpeed(value)
+	return string.format("%.1f", math.clamp((value / 100) * 28, 0, 28))
+end
+
 function applyFreeBall()
 	if not CONFIG.FreeBall then
 		for clothing, oldValue in pairs(freeBallOriginals) do
@@ -1780,6 +2239,58 @@ function applyFreeBall()
 			freeBallOriginals[shirt] = shirt.ShirtTemplate
 		end
 		shirt.ShirtTemplate = ""
+	end
+end
+
+function restoreAnimalResizer()
+	for head, original in pairs(animalResizeOriginals) do
+		if head and head.Parent and original then
+			pcall(function()
+				head.Size = original.Size
+				head.Transparency = original.Transparency
+				head.CanCollide = original.CanCollide
+				if original.CanQuery ~= nil then
+					head.CanQuery = original.CanQuery
+				end
+			end)
+		end
+
+		animalResizeOriginals[head] = nil
+	end
+end
+
+function applyAnimalResizer()
+	if not CONFIG.AnimalResizer then
+		restoreAnimalResizer()
+		return
+	end
+
+	local _, _, animalsFolder = getEntityFolders()
+	if not animalsFolder then
+		return
+	end
+
+	for _, animal in ipairs(animalsFolder:GetChildren()) do
+		if animal:IsA("Model") and not isExcludedAnimalESPModel(animal) then
+			local head = animal:FindFirstChild("Head", true)
+			if head and head:IsA("BasePart") then
+				if not animalResizeOriginals[head] then
+					animalResizeOriginals[head] = {
+						Size = head.Size,
+						Transparency = head.Transparency,
+						CanCollide = head.CanCollide,
+						CanQuery = head.CanQuery
+					}
+				end
+
+				head.Size = Vector3.new(20, 20, 20)
+				head.Transparency = 1
+				head.CanCollide = false
+				pcall(function()
+					head.CanQuery = true
+				end)
+			end
+		end
 	end
 end
 
@@ -2065,17 +2576,17 @@ setWorldBrightnessSlider = nil
 setWorldExposureSlider = nil
 setWorldClockTimeSlider = nil
 
-local aimControlsSection = makeSection(leftPane, "Aim Controls", 1, 5)
+local aimControlsSection = makeSection(leftPane, "Aim Controls", 1, 6)
 local targetFilterSection = makeSection(leftPane, "Target Filters", 2, 3)
-local viewEspSection = makeSection(worldLeftPane, "ESP Settings", 1, 8)
+local viewEspSection = makeSection(worldLeftPane, "ESP Settings", 1, 9)
 itemSection = makeSection(worldLeftPane, "Item ESP", 2, 1)
 oreSection = makeSection(worldLeftPane, "Ore ESP", 3, 6)
 lootControlsSection = makeSection(lootLeftPane, "Loot ESP", 1, 2)
 lootBankSection = makeSection(lootLeftPane, "Bank", 2, 2)
 lootOtherSection = makeSection(lootLeftPane, "Other", 3, 1)
 graphicsWeatherSection = makeSection(graphicsLeftPane, "Weather", 1, 2)
-graphicsToolsSection = makeSection(graphicsLeftPane, "View Tools", 2, 2)
-local settingsMenuSection = makeSection(settingsLeftPane, "Settings", 1, 5)
+graphicsToolsSection = makeSection(graphicsLeftPane, "View Tools", 2, 4)
+local settingsMenuSection = makeSection(settingsLeftPane, "Settings", 1, 7)
 
 local enabledButton = makeToggleButton(aimControlsSection, "Soft Aim", 1)
 local modeButton = makeButton(aimControlsSection, "", 2)
@@ -2086,6 +2597,8 @@ local showFOVButton = makeToggleButton(aimControlsSection, "Fov", 6)
 wallCheckButton = makeToggleButton(aimControlsSection, "Wall Check", 7)
 softAimKeyButton = makeButton(aimControlsSection, "", 8)
 softAimKeyNoneButton = makeButton(aimControlsSection, "Soft Aim Key Reset", 9)
+antiFactionButton = makeToggleButton(aimControlsSection, "Anti Faction", 10)
+deadCheckButton = makeToggleButton(aimControlsSection, "Dead Check", 11)
 local playersButton = makeToggleButton(targetFilterSection, "Players", 1)
 local animalsButton = makeToggleButton(targetFilterSection, "Animals", 2)
 local npcsButton = makeToggleButton(targetFilterSection, "NPCs", 3)
@@ -2098,6 +2611,11 @@ local clearCloudsButton = makeToggleButton(graphicsWeatherSection, "Clouds", 3)
 local fullBrightButton = makeToggleButton(graphicsToolsSection, "Full Bright", 1)
 local cameraFOVButton = makeToggleButton(graphicsToolsSection, "Camera FOV", 2)
 resetWorldButton = makeButton(graphicsToolsSection, "Reset World", 3)
+opLassoButton = makeToggleButton(graphicsToolsSection, "Op Lasso", 4)
+maxJumpButton = makeToggleButton(graphicsToolsSection, "Max Jump", 5)
+infStaminaButton = makeToggleButton(graphicsToolsSection, "Inf Stamina", 6)
+fasterRollButton = makeToggleButton(graphicsToolsSection, "Faster Roll", 7)
+resetWalkSpeedButton = makeButton(graphicsToolsSection, "Reset WalkSpeed", 8)
 
 local function formatFOV(value)
 	if value <= 0 then
@@ -2364,7 +2882,8 @@ local worldTracerButton = makeToggleButton(viewEspSection, "Tracers", 6)
 local worldNameButton = makeToggleButton(viewEspSection, "Name", 7)
 local worldDistanceButton = makeToggleButton(viewEspSection, "Distance", 8)
 local worldPlayerWeaponButton = makeToggleButton(viewEspSection, "Player Weapon", 9)
-local worldShowHealthButton = makeToggleButton(viewEspSection, "Show Health", 10)
+animalResizerButton = makeToggleButton(viewEspSection, "Animal Resizer", 10)
+local worldShowHealthButton = makeToggleButton(viewEspSection, "Show Health", 11)
 local worldAnimalHPButton = makeToggleButton(viewEspSection, "Animal HP", 12)
 local worldHorseHPButton = makeToggleButton(viewEspSection, "Horse HP", 13)
 local worldHealthModeButton = makeButton(viewEspSection, "", 14)
@@ -2510,6 +3029,15 @@ setCameraFOVSlider = makeSlider(graphicsRightPane, "Camera FOV", 1, 120, CONFIG.
 	end
 end)
 
+CONFIG.WalkSpeed = getWalkSpeedSliderDefault()
+setWalkSpeedSlider = makeSlider(graphicsRightPane, "WalkSpeed", 0, 100, CONFIG.WalkSpeed, 5, function(value)
+	CONFIG.WalkSpeed = value
+	if walkSpeedSliderReady then
+		applyWalkSpeed()
+	end
+end, formatWalkSpeed)
+walkSpeedSliderReady = true
+
 worldEditorReady = true
 
 local keybindButton = makeButton(settingsMenuSection, "", 1)
@@ -2520,8 +3048,11 @@ serverHopButton = makeButton(settingsMenuSection, "Server hop", 5)
 americanServersButton = makeToggleButton(settingsMenuSection, "American servers", 6)
 boostFPSButton = makeToggleButton(settingsMenuSection, "Boost FPS", 7)
 dragonIRLButton = makeToggleButton(settingsMenuSection, "Dragon IRL", 8)
-freeBallButton = makeToggleButton(settingsMenuSection, "Free Ball", 9)
-local sitButton = makeButton(settingsMenuSection, "Sit", 10)
+giantModeButton = makeToggleButton(settingsMenuSection, "Giant Mode", 9)
+freeBallButton = makeToggleButton(settingsMenuSection, "Free Ball", 10)
+local sitButton = makeButton(settingsMenuSection, "Sit", 11)
+ragdollKeyButton = makeButton(settingsMenuSection, "", 12)
+clientInfoButton = makeToggleButton(settingsMenuSection, "Client Info", 13)
 
 creditsLabel = Instance.new("TextLabel")
 creditsLabel.Size = UDim2.new(1, 0, 0, 44)
@@ -2641,6 +3172,8 @@ local function refreshGui()
 	hitPartButton.Text = "Hit: " .. CONFIG.HitPart
 	setToggleDisplay(showFOVButton, "Fov", CONFIG.ShowFOV)
 	setToggleDisplay(wallCheckButton, "Wall Check", CONFIG.TargetWallCheck)
+	setToggleDisplay(antiFactionButton, "Anti Faction", CONFIG.AntiFaction)
+	setToggleDisplay(deadCheckButton, "Dead Check", CONFIG.DeadCheck)
 	setToggleDisplay(playersButton, "Players", CONFIG.Players)
 	setToggleDisplay(animalsButton, "Animals", CONFIG.Animals)
 	setToggleDisplay(npcsButton, "NPCs", CONFIG.NPCs)
@@ -2649,6 +3182,10 @@ local function refreshGui()
 	setToggleDisplay(targetDistanceButton, "Distance", CONFIG.TargetDistance)
 	setToggleDisplay(fullBrightButton, "Full Bright", CONFIG.FullBright)
 	setToggleDisplay(cameraFOVButton, "Camera FOV", CONFIG.CameraFOVEnabled)
+	setToggleDisplay(opLassoButton, "Op Lasso", CONFIG.OpLasso)
+	setToggleDisplay(maxJumpButton, "Max Jump", CONFIG.MaxJump)
+	setToggleDisplay(infStaminaButton, "Inf Stamina", CONFIG.InfStamina)
+	setToggleDisplay(fasterRollButton, "Faster Roll", CONFIG.FasterRoll)
 	setToggleDisplay(worldEnabledButton, "ESP", CONFIG.WorldEnabled)
 	setToggleDisplay(worldPlayersButton, "Players", CONFIG.WorldPlayers)
 	setToggleDisplay(worldAnimalsButton, "Animals", CONFIG.WorldAnimals)
@@ -2658,6 +3195,7 @@ local function refreshGui()
 	setToggleDisplay(worldNameButton, "Name", CONFIG.WorldName)
 	setToggleDisplay(worldDistanceButton, "Distance", CONFIG.WorldDistance)
 	setToggleDisplay(worldPlayerWeaponButton, "Player Weapon", CONFIG.WorldPlayerWeapon)
+	setToggleDisplay(animalResizerButton, "Animal Resizer", CONFIG.AnimalResizer)
 	setToggleDisplay(worldShowHealthButton, "Show Health", CONFIG.WorldShowHealth)
 	setToggleDisplay(worldAnimalHPButton, "Animal HP", CONFIG.WorldAnimalHealth)
 	setToggleDisplay(worldHorseHPButton, "Horse HP", CONFIG.WorldHorseHealth)
@@ -2688,10 +3226,14 @@ local function refreshGui()
 	setToggleDisplay(americanServersButton, "American servers", CONFIG.AmericanServers)
 	setToggleDisplay(boostFPSButton, "Boost FPS", CONFIG.BoostFPS)
 	setToggleDisplay(dragonIRLButton, "Dragon IRL", CONFIG.DragonIRL)
+	setToggleDisplay(giantModeButton, "Giant Mode", CONFIG.GiantMode)
 	setToggleDisplay(freeBallButton, "Free Ball", CONFIG.FreeBall)
+	setToggleDisplay(clientInfoButton, "Client Info", CONFIG.ClientInfoEnabled)
+	ragdollKeyButton.Text = waitingForRagdollKeybind and "Ragdoll Key: ..." or ("Ragdoll Key: " .. getShortKeyName(CONFIG.RagdollSelfKey))
 	softAimKeyButton.Text = waitingForSoftAimKeybind and "Soft Aim Key: ..." or ("Soft Aim Key: " .. getShortKeyName(CONFIG.SoftAimToggleKey))
 	softAimKeyNoneButton.Text = "Soft Aim Key Reset"
 	resetWorldButton.Text = "Reset World"
+	resetWalkSpeedButton.Text = "Reset WalkSpeed"
 
 	fovCircle.Visible = CONFIG.ShowFOV and CONFIG.FOV > 0
 end
@@ -3023,6 +3565,8 @@ end)
 
 keybindButton.MouseButton1Click:Connect(function()
 	waitingForKeybind = true
+	waitingForSoftAimKeybind = false
+	waitingForRagdollKeybind = false
 	refreshGui()
 end)
 
@@ -3055,6 +3599,29 @@ end)
 wallCheckButton.MouseButton1Click:Connect(function()
 	CONFIG.TargetWallCheck = not CONFIG.TargetWallCheck
 	lastTargetScan = 0
+	refreshGui()
+end)
+
+antiFactionButton.MouseButton1Click:Connect(function()
+	CONFIG.AntiFaction = not CONFIG.AntiFaction
+	lastFactionAllyScan = 0
+	currentTarget = nil
+	if clearCandidateCache then
+		clearCandidateCache()
+	end
+	if setVisualTarget then
+		setVisualTarget(nil)
+	end
+	refreshGui()
+end)
+
+deadCheckButton.MouseButton1Click:Connect(function()
+	CONFIG.DeadCheck = not CONFIG.DeadCheck
+	softAimAliveCache = setmetatable({}, { __mode = "k" })
+	currentTarget = nil
+	if clearCandidateCache then
+		clearCandidateCache()
+	end
 	refreshGui()
 end)
 
@@ -3120,6 +3687,41 @@ end)
 
 resetWorldButton.MouseButton1Click:Connect(function()
 	resetWorldEditorValues()
+	refreshGui()
+end)
+
+opLassoButton.MouseButton1Click:Connect(function()
+	CONFIG.OpLasso = not CONFIG.OpLasso
+	applyOpLasso()
+	refreshGui()
+end)
+
+maxJumpButton.MouseButton1Click:Connect(function()
+	CONFIG.MaxJump = not CONFIG.MaxJump
+	applyMaxJump()
+	refreshGui()
+end)
+
+infStaminaButton.MouseButton1Click:Connect(function()
+	CONFIG.InfStamina = not CONFIG.InfStamina
+	applyInfStamina()
+	refreshGui()
+end)
+
+fasterRollButton.MouseButton1Click:Connect(function()
+	CONFIG.FasterRoll = not CONFIG.FasterRoll
+	applyFasterRoll()
+	refreshGui()
+end)
+
+resetWalkSpeedButton.MouseButton1Click:Connect(function()
+	restoreWalkSpeedValues()
+	CONFIG.WalkSpeed = getWalkSpeedSliderDefault()
+	if setWalkSpeedSlider then
+		walkSpeedSliderReady = false
+		setWalkSpeedSlider(CONFIG.WalkSpeed)
+		walkSpeedSliderReady = true
+	end
 	refreshGui()
 end)
 
@@ -3280,6 +3882,12 @@ worldPlayerWeaponButton.MouseButton1Click:Connect(function()
 	if refreshWorldESP then
 		refreshWorldESP(true)
 	end
+	refreshGui()
+end)
+
+animalResizerButton.MouseButton1Click:Connect(function()
+	CONFIG.AnimalResizer = not CONFIG.AnimalResizer
+	applyAnimalResizer()
 	refreshGui()
 end)
 
@@ -3476,6 +4084,12 @@ dragonIRLButton.MouseButton1Click:Connect(function()
 	refreshGui()
 end)
 
+giantModeButton.MouseButton1Click:Connect(function()
+	CONFIG.GiantMode = not CONFIG.GiantMode
+	applyGiantMode()
+	refreshGui()
+end)
+
 freeBallButton.MouseButton1Click:Connect(function()
 	CONFIG.FreeBall = not CONFIG.FreeBall
 	applyFreeBall()
@@ -3490,9 +4104,25 @@ sitButton.MouseButton1Click:Connect(function()
 	end
 end)
 
+ragdollKeyButton.MouseButton1Click:Connect(function()
+	waitingForRagdollKeybind = true
+	waitingForKeybind = false
+	waitingForSoftAimKeybind = false
+	refreshGui()
+end)
+
+clientInfoButton.MouseButton1Click:Connect(function()
+	CONFIG.ClientInfoEnabled = not CONFIG.ClientInfoEnabled
+	if clientInfoFrame then
+		clientInfoFrame.Visible = CONFIG.ClientInfoEnabled
+	end
+	refreshGui()
+end)
+
 softAimKeyButton.MouseButton1Click:Connect(function()
 	waitingForSoftAimKeybind = true
 	waitingForKeybind = false
+	waitingForRagdollKeybind = false
 	refreshGui()
 end)
 
@@ -3557,6 +4187,22 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
+	if waitingForRagdollKeybind and input.UserInputType == Enum.UserInputType.Keyboard then
+		if clearRagdollSelfKey(input.KeyCode) then
+			CONFIG.RagdollSelfKey = nil
+			waitingForRagdollKeybind = false
+			refreshGui()
+		elseif isRagdollSelfBlockedKey(input.KeyCode) then
+			waitingForRagdollKeybind = false
+			setServerButtonStatus(ragdollKeyButton, "Can't use E/Space", 1.4)
+		else
+			CONFIG.RagdollSelfKey = input.KeyCode
+			waitingForRagdollKeybind = false
+			refreshGui()
+		end
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == CONFIG.MenuKey then
 		panel.Visible = not panel.Visible
 		return
@@ -3569,6 +4215,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			setVisualTarget(nil)
 		end
 		refreshGui()
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.Keyboard and CONFIG.RagdollSelfKey and input.KeyCode == CONFIG.RagdollSelfKey then
+		ragdollSelf()
 		return
 	end
 
@@ -3800,6 +4451,16 @@ function getEntityRootModel(model, groupName)
 	end
 
 	return model
+end
+
+function isExcludedAnimalESPModel(model)
+	if not model then
+		return false
+	end
+
+	local rootModel = getEntityRootModel(model, "Animal") or model
+	local normalizedName = normalizeLookupText(rootModel.Name)
+	return normalizedName == "horse" or normalizedName == "wendigohorse"
 end
 
 function findChildInsensitive(parent, wantedName)
@@ -4070,7 +4731,11 @@ function shouldTrackModel(model, groupName)
 	end
 
 	if groupName == "Player" then
-		return not isLocalPlayerModel(model)
+		return not isLocalPlayerModel(model) and not isFactionAllyTarget(model, groupName)
+	end
+
+	if groupName == "Animal" and isOwnHorseModel(model) then
+		return false
 	end
 
 	return not isOwnModel(model)
@@ -4079,6 +4744,16 @@ end
 function shouldTrackWorldModel(model, groupName)
 	if not model or not model:IsA("Model") or isOwnModel(model) or not getRootPart(model) then
 		return false
+	end
+
+	if groupName == "Animal" and isExcludedAnimalESPModel(model) then
+		if not isHorseModel(model) then
+			return false
+		end
+
+		if not CONFIG.WorldHorseHealth and not CONFIG.ZayHorse and not isOwnHorseModel(model) then
+			return false
+		end
 	end
 
 	if groupName == "Player" then
@@ -4334,6 +5009,96 @@ function normalizeLookupText(value)
 	end
 
 	return string.lower(tostring(value)):gsub("[^%w]", "")
+end
+
+function getFactionMembersFrame()
+	local current = playerGui:FindFirstChild("FactionUI")
+	for _, childName in ipairs({ "Faction", "Container", "Body", "Page", "MembersPage", "ScrollingFrame" }) do
+		if not current then
+			return nil
+		end
+
+		current = current:FindFirstChild(childName)
+	end
+
+	return current
+end
+
+function refreshFactionAllyCache(force)
+	if not CONFIG.AntiFaction then
+		factionAllyCache = {}
+		return factionAllyCache
+	end
+
+	local now = os.clock()
+	if not force and now - lastFactionAllyScan < 2 then
+		return factionAllyCache
+	end
+
+	lastFactionAllyScan = now
+	local nextCache = {}
+	local membersFrame = getFactionMembersFrame()
+	if membersFrame then
+		for _, entry in ipairs(membersFrame:GetChildren()) do
+			local container = entry:FindFirstChild("Container")
+			local userName = container and container:FindFirstChild("UserName")
+			if not userName then
+				userName = entry:FindFirstChild("UserName", true)
+			end
+
+			if userName then
+				local ok, text = pcall(function()
+					return userName.Text
+				end)
+				local normalized = ok and normalizeLookupText(text) or ""
+				if normalized ~= "" then
+					nextCache[normalized] = true
+					for token in tostring(text):gmatch("[%w_]+") do
+						local normalizedToken = normalizeLookupText(token)
+						if normalizedToken ~= "" then
+							nextCache[normalizedToken] = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	factionAllyCache = nextCache
+	return factionAllyCache
+end
+
+function factionCacheContainsName(name)
+	local normalized = normalizeLookupText(name)
+	if normalized == "" then
+		return false
+	end
+
+	if factionAllyCache[normalized] then
+		return true
+	end
+
+	return false
+end
+
+function isFactionAllyTarget(model, groupName)
+	if not CONFIG.AntiFaction or groupName ~= "Player" or not model then
+		return false
+	end
+
+	refreshFactionAllyCache(false)
+
+	local player = getPlayerForModel(model)
+	if player and factionCacheContainsName(player.Name) then
+		return true
+	end
+
+	local entityRoot = getEntityRootModel(model, "Player")
+	if entityRoot and factionCacheContainsName(entityRoot.Name) then
+		return true
+	end
+
+	return factionCacheContainsName(model.Name)
 end
 
 function getPlayerForModel(model)
@@ -4769,6 +5534,10 @@ function hasDeadStateFlag(model)
 		return false
 	end
 
+	if isDeadFaceDead(model) then
+		return true
+	end
+
 	local deadNames = {
 		dead = true,
 		isdead = true,
@@ -4887,11 +5656,17 @@ function isSoftAimAliveTarget(model, groupName)
 	end
 
 	local value = false
-	local ok, health = pcall(getAliveCheckHealth, model, groupName)
-	if ok and health ~= nil then
-		value = health > 0
-	elseif not hasDeadStateFlag(model) then
+	if isDeadFaceDead(model) then
 		value = false
+	else
+		local ok, health = pcall(getAliveCheckHealth, model, groupName)
+		if ok and health ~= nil then
+			value = health > 0
+		elseif hasDeadStateFlag(model) then
+			value = false
+		else
+			value = true
+		end
 	end
 
 	softAimAliveCache[entityRoot] = {
@@ -5068,7 +5843,7 @@ function reassertWorldESPHighlight(model, groupName)
 
 		esp.Highlight.Adornee = stableModel
 		esp.WorldAdornee = stableModel
-		esp.ChamsEnabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or (esp.OwnHorse and CONFIG.ZayHorse))
+		esp.ChamsEnabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or esp.OwnHorse or (esp.OwnHorse and CONFIG.ZayHorse))
 		esp.Highlight.Enabled = esp.ChamsEnabled
 		lastWorldESPUpdate = 0
 		if refreshWorldESP then
@@ -5082,7 +5857,7 @@ function shouldKeepAnimalESPWarm(model, esp, fromPosition)
 		return false
 	end
 
-	if not CONFIG.WorldAnimals and not (CONFIG.ZayHorse and esp.OwnHorse) then
+	if not CONFIG.WorldAnimals and not esp.OwnHorse and not (CONFIG.ZayHorse and esp.OwnHorse) then
 		return false
 	end
 
@@ -5099,7 +5874,7 @@ function shouldKeepAnimalESPWarm(model, esp, fromPosition)
 	end
 
 	if esp.Highlight then
-		esp.ChamsEnabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or (esp.OwnHorse and CONFIG.ZayHorse))
+		esp.ChamsEnabled = CONFIG.WorldEnabled and (CONFIG.WorldChams or esp.OwnHorse or (esp.OwnHorse and CONFIG.ZayHorse))
 		esp.WorldAdornee = model
 		esp.Highlight.Adornee = model
 		esp.Highlight.Enabled = esp.ChamsEnabled
@@ -5116,6 +5891,17 @@ function addWorldCandidate(model, groupName, seen)
 	end
 
 	seen[model] = true
+
+	if groupName == "Animal" and not CONFIG.WorldAnimals then
+		local horseModel = isHorseModel(model)
+		if horseModel then
+			if not CONFIG.WorldHorseHealth and not CONFIG.ZayHorse and not isOwnHorseModel(model) then
+				return
+			end
+		elseif not CONFIG.WorldAnimalHealth then
+			return
+		end
+	end
 
 	if not shouldTrackWorldModel(model, groupName) then
 		return
@@ -5303,7 +6089,7 @@ function makeWorldESPObject(model)
 end
 
 refreshWorldESP = function(force)
-	if unloaded then
+	if unloaded or not interfaceReady then
 		return
 	end
 
@@ -5420,7 +6206,7 @@ refreshWorldESP = function(force)
 		esp.Highlight.OutlineTransparency = ownHorse and CONFIG.ZayHorse and 0 or 0.18
 		esp.Highlight.DepthMode = ownHorse and CONFIG.ZayHorse and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.AlwaysOnTop
 		esp.Highlight.Adornee = model
-		esp.ChamsEnabled = (CONFIG.WorldChams and normalAnimalVisible) or (ownHorse and CONFIG.ZayHorse)
+		esp.ChamsEnabled = (CONFIG.WorldChams and (normalAnimalVisible or ownHorse)) or (ownHorse and CONFIG.ZayHorse)
 		esp.WorldAdornee = model
 		esp.Highlight.Enabled = esp.ChamsEnabled
 
@@ -5778,7 +6564,7 @@ clearOreESP = function()
 end
 
 refreshOreESP = function(force)
-	if unloaded then
+	if unloaded or not interfaceReady then
 		return
 	end
 
@@ -5927,6 +6713,72 @@ function repairESPChams()
 					esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 					esp.Highlight.Enabled = true
 				end)
+			end
+		end
+	end
+
+	for tree, esp in pairs(thunderTreeEspObjects) do
+		if esp.Visible and esp.Highlight and esp.Highlight.Adornee and esp.Highlight.Adornee.Parent then
+			pcall(function()
+				esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				esp.Highlight.Enabled = true
+			end)
+		end
+	end
+
+	for model, esp in pairs(legendaryAnimalEspObjects) do
+		if esp.Visible and esp.Highlight and model and model.Parent then
+			pcall(function()
+				esp.Highlight.Adornee = model
+				esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				esp.Highlight.Enabled = true
+			end)
+		end
+	end
+end
+
+function rebuildWorldAnimalHighlight(model, esp)
+	if not model or not model.Parent or not esp then
+		return
+	end
+
+	local oldHighlight = esp.Highlight
+	local fillColor = oldHighlight and oldHighlight.FillColor or getWorldESPColor("Animal")
+	local outlineColor = oldHighlight and oldHighlight.OutlineColor or fillColor:Lerp(Color3.fromRGB(255, 255, 255), 0.42)
+	local fillTransparency = oldHighlight and oldHighlight.FillTransparency or 0.78
+	local outlineTransparency = oldHighlight and oldHighlight.OutlineTransparency or 0.18
+
+	if oldHighlight then
+		pcall(function()
+			oldHighlight:Destroy()
+		end)
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "SoftAimWorldESPHighlight"
+	highlight.FillColor = fillColor
+	highlight.OutlineColor = outlineColor
+	highlight.FillTransparency = fillTransparency
+	highlight.OutlineTransparency = outlineTransparency
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Adornee = model
+	highlight.Enabled = true
+	highlight.Parent = screenGui
+	esp.Highlight = highlight
+	esp.WorldAdornee = model
+	esp.ChamsEnabled = true
+end
+
+function rebindAnimalWorldChams()
+	if not CONFIG.WorldEnabled or (not CONFIG.WorldAnimals and not CONFIG.WorldHorseHealth and not CONFIG.ZayHorse) then
+		return
+	end
+
+	for model, esp in pairs(worldEspObjects) do
+		if esp.Group == "Animal" and esp.WorldVisible and esp.Highlight and esp.ChamsEnabled then
+			local adornee = esp.WorldAdornee or model
+			if adornee and adornee.Parent then
+				rebuildWorldAnimalHighlight(adornee, esp)
 			end
 		end
 	end
@@ -6506,14 +7358,14 @@ function setStatusButton(button, text, color)
 	button.TextColor3 = color
 end
 
-function showRobberyPopup(title, body, color)
+function showRobberyPopup(title, body, color, duration, urgent)
 	if unloaded or not CONFIG.RobberyPopup or not robberyPopupContainer then
 		return
 	end
 
 	local popup = Instance.new("Frame")
 	popup.Name = "RobberyPopup"
-	popup.Size = UDim2.fromOffset(340, 58)
+	popup.Size = urgent and UDim2.fromOffset(380, 74) or UDim2.fromOffset(340, 58)
 	popup.BackgroundColor3 = CONFIG.NotificationBackgroundColor
 	popup.BackgroundTransparency = 1
 	popup.BorderSizePixel = 0
@@ -6522,7 +7374,7 @@ function showRobberyPopup(title, body, color)
 	popup.ZIndex = 121
 	popup.Parent = robberyPopupContainer
 	makeCorner(popup, 12)
-	local stroke = makeStroke(popup, CONFIG.NotificationColor, 1, 1)
+	local stroke = makeStroke(popup, CONFIG.NotificationColor, urgent and 2 or 1, 1)
 
 	local gradient = Instance.new("UIGradient")
 	gradient.Color = ColorSequence.new({
@@ -6534,7 +7386,7 @@ function showRobberyPopup(title, body, color)
 	gradient.Parent = popup
 
 	local accent = Instance.new("Frame")
-	accent.Size = UDim2.new(0, 4, 1, -14)
+	accent.Size = UDim2.new(0, urgent and 7 or 4, 1, -14)
 	accent.Position = UDim2.fromOffset(8, 7)
 	accent.BackgroundColor3 = (color or CONFIG.NotificationColor):Lerp(CONFIG.NotificationColor, 0.45)
 	accent.BackgroundTransparency = 1
@@ -6545,26 +7397,26 @@ function showRobberyPopup(title, body, color)
 
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Position = UDim2.fromOffset(22, 8)
-	titleLabel.Size = UDim2.new(1, -42, 0, 23)
+	titleLabel.Size = UDim2.new(1, -42, 0, urgent and 29 or 23)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Text = title
 	titleLabel.TextColor3 = CONFIG.NotificationColor:Lerp(Color3.fromRGB(255, 255, 255), 0.75)
 	titleLabel.TextTransparency = 1
 	titleLabel.Font = Enum.Font.GothamSemibold
-	titleLabel.TextSize = 15
+	titleLabel.TextSize = urgent and 18 or 15
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.ZIndex = 123
 	titleLabel.Parent = popup
 
 	local bodyLabel = Instance.new("TextLabel")
-	bodyLabel.Position = UDim2.fromOffset(22, 32)
-	bodyLabel.Size = UDim2.new(1, -42, 0, 17)
+	bodyLabel.Position = UDim2.fromOffset(22, urgent and 42 or 32)
+	bodyLabel.Size = UDim2.new(1, -42, 0, urgent and 22 or 17)
 	bodyLabel.BackgroundTransparency = 1
 	bodyLabel.Text = body
 	bodyLabel.TextColor3 = CONFIG.NotificationColor:Lerp(Color3.fromRGB(190, 190, 205), 0.6)
 	bodyLabel.TextTransparency = 1
 	bodyLabel.Font = Enum.Font.GothamMedium
-	bodyLabel.TextSize = 12
+	bodyLabel.TextSize = urgent and 14 or 12
 	bodyLabel.TextXAlignment = Enum.TextXAlignment.Left
 	bodyLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	bodyLabel.ZIndex = 123
@@ -6586,7 +7438,7 @@ function showRobberyPopup(title, body, color)
 		TextTransparency = 0
 	}):Play()
 
-	task.delay(5, function()
+	task.delay(duration or 5, function()
 		if unloaded or not popup.Parent then
 			return
 		end
@@ -6613,6 +7465,12 @@ function showRobberyPopup(title, body, color)
 			end
 		end)
 	end)
+
+	return {
+		Popup = popup,
+		TitleLabel = titleLabel,
+		BodyLabel = bodyLabel
+	}
 end
 
 function showThunderTreePopup(regionName, distance)
@@ -6625,7 +7483,9 @@ function showThunderTreePopup(regionName, distance)
 	showRobberyPopup(
 		"!!! THUNDERSTRUCK TREE !!!",
 		tostring(regionName or "Unknown Region") .. " / " .. tostring(distance or 0) .. " studs",
-		Color3.fromRGB(255, 255, 0)
+		Color3.fromRGB(255, 255, 0),
+		30,
+		true
 	)
 	CONFIG.NotificationColor = oldColor
 	CONFIG.NotificationBackgroundColor = oldBackground
@@ -6786,7 +7646,7 @@ function updateItemESPEntry(instance, labelText, color, fromPosition, visibleIte
 end
 
 refreshItemESP = function(force)
-	if unloaded then
+	if unloaded or not interfaceReady then
 		return
 	end
 
@@ -6984,7 +7844,7 @@ clearThunderTreeESP = function()
 end
 
 refreshThunderTreeESP = function(force)
-	if unloaded then
+	if unloaded or not interfaceReady then
 		return
 	end
 
@@ -7054,6 +7914,201 @@ refreshThunderTreeESP = function(force)
 	end
 end
 
+function showLegendaryAnimalPopup(animalName, distance)
+	local oldColor = CONFIG.NotificationColor
+	local oldBackground = CONFIG.NotificationBackgroundColor
+	local oldPopup = CONFIG.RobberyPopup
+	CONFIG.NotificationColor = Color3.fromRGB(255, 80, 255)
+	CONFIG.NotificationBackgroundColor = Color3.fromRGB(34, 8, 48)
+	CONFIG.RobberyPopup = true
+	local popupState = showRobberyPopup(
+		"!!! LEGENDARY ANIMAL !!!",
+		tostring(animalName or "Animal") .. " / " .. tostring(distance or 0) .. " studs",
+		Color3.fromRGB(255, 80, 255),
+		30,
+		true
+	)
+	CONFIG.NotificationColor = oldColor
+	CONFIG.NotificationBackgroundColor = oldBackground
+	CONFIG.RobberyPopup = oldPopup
+	return popupState
+end
+
+function updateLegendaryAnimalPopup(model, animalName, distance)
+	local popupState = legendaryAnimalNotified[model]
+	if type(popupState) ~= "table" or not popupState.BodyLabel or not popupState.BodyLabel.Parent then
+		return
+	end
+
+	popupState.BodyLabel.Text = tostring(animalName or "Animal") .. " / " .. tostring(distance or 0) .. " studs"
+end
+
+function getLegendaryAnimalName(model)
+	local nameOk, nameText = pcall(getAnimalDisplayName, model)
+	nameText = (nameOk and nameText) or (model and model.Name) or "Animal"
+	if nameText == "" or normalizeLookupText(nameText) == "model" then
+		nameText = "Animal"
+	end
+
+	return nameText
+end
+
+function getLegendaryAnimalHealth(model)
+	local current, maximum = getCachedHealthInfo(model, "Animal")
+	return current, maximum or current
+end
+
+function isLegendaryAnimal(model)
+	if not model or not model.Parent or isHorseModel(model) or isExcludedAnimalESPModel(model) then
+		return false
+	end
+
+	local current, maximum = getLegendaryAnimalHealth(model)
+	return (maximum ~= nil and maximum >= 350) or (current ~= nil and current >= 350)
+end
+
+function makeLegendaryAnimalESPObject(model)
+	local esp = {}
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "TubzLegendaryAnimalHighlight"
+	highlight.FillTransparency = 0.55
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = false
+	highlight.Parent = screenGui
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "TubzLegendaryAnimalName"
+	billboard.Size = UDim2.fromOffset(360, 46)
+	billboard.StudsOffset = Vector3.new(0, 4.8, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = false
+	billboard.MaxDistance = 1000000
+	billboard.Parent = screenGui
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Font = Enum.Font.GothamBlack
+	label.TextSize = 18
+	label.TextWrapped = false
+	label.TextTruncate = Enum.TextTruncate.None
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.05
+	label.Parent = billboard
+
+	esp.Highlight = highlight
+	esp.Billboard = billboard
+	esp.Label = label
+	legendaryAnimalEspObjects[model] = esp
+	return esp
+end
+
+function updateLegendaryAnimalColors()
+	for model, esp in pairs(legendaryAnimalEspObjects) do
+		if esp.Visible and esp.Label then
+			local color = getZayColor(getZayOffset(model))
+			esp.Label.TextColor3 = color
+			if esp.Highlight then
+				esp.Highlight.FillColor = color
+				esp.Highlight.OutlineColor = color:Lerp(Color3.fromRGB(255, 255, 255), 0.38)
+			end
+		end
+	end
+end
+
+clearLegendaryAnimalESP = function()
+	for model, esp in pairs(legendaryAnimalEspObjects) do
+		if esp.Highlight then
+			esp.Highlight:Destroy()
+		end
+
+		if esp.Billboard then
+			esp.Billboard:Destroy()
+		end
+
+		legendaryAnimalEspObjects[model] = nil
+	end
+end
+
+refreshLegendaryAnimalESP = function(force)
+	if unloaded or not interfaceReady then
+		return
+	end
+
+	local now = os.clock()
+	updateLegendaryAnimalColors()
+	if not force and lastLegendaryAnimalESPUpdate > 0 and now - lastLegendaryAnimalESPUpdate < 1.5 then
+		return
+	end
+
+	lastLegendaryAnimalESPUpdate = now
+
+	local _, _, animalsFolder = getEntityFolders()
+	if not animalsFolder then
+		for _, esp in pairs(legendaryAnimalEspObjects) do
+			esp.Visible = false
+			esp.Highlight.Enabled = false
+			esp.Billboard.Enabled = false
+		end
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	local character = localPlayer.Character
+	local characterRoot = character and character:FindFirstChild("HumanoidRootPart")
+	local fromPosition = characterRoot and characterRoot.Position or camera and camera.CFrame.Position
+	local visibleAnimals = {}
+
+	for _, candidate in ipairs(animalsFolder:GetDescendants()) do
+		if candidate:IsA("Model")
+			and getRootPart(candidate)
+			and not hasTrackableAncestorInFolder(candidate, animalsFolder)
+		then
+			local model = getEntityRootModel(candidate, "Animal") or candidate
+			if model and model.Parent and isLegendaryAnimal(model) then
+				local root = getRootPart(model)
+				if root then
+					local distance = fromPosition and math.floor((root.Position - fromPosition).Magnitude) or 0
+					local animalName = getLegendaryAnimalName(model)
+					local esp = legendaryAnimalEspObjects[model] or makeLegendaryAnimalESPObject(model)
+					local color = getZayColor(getZayOffset(model))
+
+					visibleAnimals[model] = true
+					esp.Visible = true
+					esp.Highlight.Adornee = model
+					esp.Highlight.FillColor = color
+					esp.Highlight.OutlineColor = color:Lerp(Color3.fromRGB(255, 255, 255), 0.38)
+					esp.Highlight.Enabled = true
+
+					esp.Billboard.Adornee = root
+					esp.Billboard.Enabled = true
+					esp.Label.TextColor3 = color
+					esp.Label.Text = "Legendary " .. animalName .. " / " .. tostring(distance) .. " studs"
+
+					if not legendaryAnimalNotified[model] then
+						legendaryAnimalNotified[model] = showLegendaryAnimalPopup(animalName, distance) or true
+					else
+						updateLegendaryAnimalPopup(model, animalName, distance)
+					end
+				end
+			end
+		end
+	end
+
+	for model, esp in pairs(legendaryAnimalEspObjects) do
+		if not visibleAnimals[model] then
+			esp.Visible = false
+			esp.Highlight.Enabled = false
+			esp.Billboard.Enabled = false
+		end
+	end
+end
+
 function isTargetBehindWall(model, position, originOverride)
 	local camera = Workspace.CurrentCamera
 	if not camera or not model or not position then
@@ -7108,6 +8163,12 @@ end
 
 function setVisualTarget(target)
 	if unloaded then
+		return
+	end
+
+	if not interfaceReady then
+		targetHighlight.Enabled = false
+		targetBillboard.Enabled = false
 		return
 	end
 
@@ -7235,6 +8296,10 @@ function getBestTarget(origin)
 		end
 
 		if not shouldTrackModel(model, modelGroup) then
+			return
+		end
+
+		if CONFIG.DeadCheck and not isSoftAimAliveTarget(model, modelGroup) then
 			return
 		end
 
@@ -7379,6 +8444,9 @@ function getSoftAimDirection(origin, fallbackDirection)
 
 	local target = currentTarget
 	local reuseTarget = CONFIG.TargetMode ~= "Closest To Cursor" and target and target.Model and target.Model.Parent
+	if reuseTarget and not shouldTrackModel(target.Model, target.Group) then
+		reuseTarget = false
+	end
 	if reuseTarget and typeof(origin) == "Vector3" and target.Position then
 		local distance = (target.Position - origin).Magnitude
 		if CONFIG.MaxTargetDistance > 0 and distance > CONFIG.MaxTargetDistance then
@@ -7570,10 +8638,14 @@ unloadScript = function()
 	rightDown = false
 	waitingForKeybind = false
 	waitingForSoftAimKeybind = false
+	waitingForRagdollKeybind = false
 	currentTarget = nil
 
 	pcall(function()
 		RunService:UnbindFromRenderStep("SoftAimLocalAssist")
+	end)
+	pcall(function()
+		ContextActionService:UnbindAction("TubzRagdollGetUpDelay")
 	end)
 	pcall(disconnectDynamicRefreshConnections)
 
@@ -7584,13 +8656,26 @@ unloadScript = function()
 	CONFIG.WorldEditorLocked = false
 	CONFIG.BoostFPS = false
 	CONFIG.DragonIRL = false
+	CONFIG.GiantMode = false
+	CONFIG.OpLasso = false
+	CONFIG.MaxJump = false
+	CONFIG.InfStamina = false
+	CONFIG.FasterRoll = false
 	CONFIG.FreeBall = false
+	CONFIG.AnimalResizer = false
 	CONFIG.ZaySelf = false
 	pcall(applyFullBright)
 	pcall(applyWeather)
 	pcall(applyBoostFPS)
 	pcall(applyDragonIRL)
+	pcall(applyGiantMode)
+	pcall(applyOpLasso)
+	pcall(applyMaxJump)
+	pcall(applyInfStamina)
+	pcall(applyFasterRoll)
+	pcall(restoreWalkSpeedValues)
 	pcall(applyFreeBall)
+	pcall(applyAnimalResizer)
 	pcall(restoreZaySelfColors)
 	pcall(function()
 		Lighting.Brightness = lightingDefaults.Brightness
@@ -7620,6 +8705,10 @@ unloadScript = function()
 
 	if clearThunderTreeESP then
 		clearThunderTreeESP()
+	end
+
+	if clearLegendaryAnimalESP then
+		clearLegendaryAnimalESP()
 	end
 
 	if fullBrightEffect then
@@ -7674,6 +8763,17 @@ _G.TubzSoftAimUnload = unloadScript
 
 installProjectileHandlerHook()
 
+pcall(function()
+	ContextActionService:BindActionAtPriority(
+		"TubzRagdollGetUpDelay",
+		handleRagdollGetUpAction,
+		false,
+		Enum.ContextActionPriority.High.Value + 1000,
+		Enum.KeyCode.Space,
+		Enum.KeyCode.E
+	)
+end)
+
 setTab("Aim")
 refreshGui()
 applyTheme()
@@ -7692,6 +8792,8 @@ RunService:BindToRenderStep("SoftAimLocalAssist", Enum.RenderPriority.Last.Value
 	end
 
 	local now = os.clock()
+	updateClientInfo(now)
+
 	if now - lastDynamicRefreshCheck >= 10 then
 		lastDynamicRefreshCheck = now
 		ensureDynamicRefreshConnections()
@@ -7741,10 +8843,27 @@ RunService:BindToRenderStep("SoftAimLocalAssist", Enum.RenderPriority.Last.Value
 		end
 	end
 
-	if (CONFIG.DragonIRL or CONFIG.FreeBall) and now - lastLocalMorphUpdate >= 0.5 then
+	if (CONFIG.DragonIRL or CONFIG.GiantMode or CONFIG.MaxJump or CONFIG.FreeBall) and now - lastLocalMorphUpdate >= 0.5 then
 		lastLocalMorphUpdate = now
 		applyDragonIRL()
+		applyGiantMode()
+		applyMaxJump()
 		applyFreeBall()
+	end
+
+	if (CONFIG.OpLasso or CONFIG.InfStamina or CONFIG.FasterRoll or next(walkSpeedOriginals) ~= nil) and now - lastOpLassoUpdate >= 0.5 then
+		lastOpLassoUpdate = now
+		applyOpLasso()
+		applyInfStamina()
+		applyFasterRoll()
+		if next(walkSpeedOriginals) ~= nil then
+			applyWalkSpeed()
+		end
+	end
+
+	if CONFIG.AnimalResizer and now - lastAnimalResizeUpdate >= 1 then
+		lastAnimalResizeUpdate = now
+		applyAnimalResizer()
 	end
 	updateWorldTracers()
 
@@ -7757,12 +8876,21 @@ RunService:BindToRenderStep("SoftAimLocalAssist", Enum.RenderPriority.Last.Value
 		repairESPChams()
 	end
 
+	if now - lastAnimalChamRebind >= 1.25 then
+		lastAnimalChamRebind = now
+		rebindAnimalWorldChams()
+	end
+
 	if CONFIG.WorldEnabled and (CONFIG.DroppedItemESP or CONFIG.TrainESP or CONFIG.BankESP or CONFIG.BoatESP) then
 		refreshItemESP()
 	end
 
 	if refreshThunderTreeESP then
 		refreshThunderTreeESP()
+	end
+
+	if refreshLegendaryAnimalESP then
+		refreshLegendaryAnimalESP()
 	end
 
 	local aimActive = isSoftAimActive()
