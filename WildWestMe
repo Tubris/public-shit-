@@ -66,12 +66,10 @@ CONFIG = {
 	NoSpread = false,
 	GunReloadSpeed = 20, -- slider value, divided by 10
 	GunFireRate = 10, -- slider value, divided by 10
-	GunAccuracy = 10, -- slider value, divided by 10
 	WallbangPower = 1000, -- fixed strong wallbang value, divided by 10
 	AutoSprint = true,
 	NoRagdoll = false,
 	NoFallDamage = false,
-	RollLimit = false,
 	Players = true,
 	Animals = true,
 	NPCs = true,
@@ -95,6 +93,8 @@ CONFIG = {
 	HitPart = "Head", -- "Head", "Torso", "Feet", or "Random"
 	SoftAimYOffset = 0, -- slider value, divided by 100 studs
 	NPCSoftAimResolver = 140, -- extra NPC-only Y resolver, divided by 100 studs
+	SoftAimPrediction = false,
+	SoftAimPredictionAmount = 0, -- slider value, divided by 100 seconds
 	ActivationMode = "Right Click", -- "Always", "Left Click", "Right Click", or "Left Or Right"
 
 	MenuKey = Enum.KeyCode.RightShift,
@@ -275,7 +275,6 @@ playerEditorOriginals = {
 	Network = {}
 }
 lastPlayerEditorUpdate = 0
-rollLimitLastRoll = 0
 lastRollCharacter = nil
 freecamState = {
 	Active = false,
@@ -298,6 +297,7 @@ clearCandidateCache = nil
 targetCandidates = {}
 targetCandidateGroups = setmetatable({}, { __mode = "k" })
 softAimAliveCache = setmetatable({}, { __mode = "k" })
+softAimPredictionCache = setmetatable({}, { __mode = "k" })
 factionAllyCache = {}
 lastFactionAllyScan = 0
 lastCandidateRefresh = 0
@@ -414,6 +414,18 @@ horseMoveKeys = {
 	Enum.KeyCode.Left,
 	Enum.KeyCode.Down,
 	Enum.KeyCode.Right
+}
+HORSE_RAGDOLL_FIELDS = {
+	"KnockOut",
+	"Ragdolled",
+	"IsRagdolled",
+	"Ragdoll",
+	"KnockedDown"
+}
+HORSE_WATER_FIELDS = {
+	"Swimming",
+	"InWater",
+	"IsInWater"
 }
 freeBallOriginals = setmetatable({}, { __mode = "k" })
 animalResizeOriginals = setmetatable({}, { __mode = "k" })
@@ -1735,6 +1747,7 @@ settingsRightLayout.Parent = settingsRightPane
 accentSetters = {}
 themeButtons = {}
 themeSurfaces = {}
+themeDividers = {}
 targetHighlight = nil
 targetBillboard = nil
 targetText = nil
@@ -2386,10 +2399,9 @@ function applyGunMods()
 			rememberTableHook(gunModsOriginals.ProjectileHandler, projectileHandler, "GetProjectileSpread")
 			projectileHandler.GetProjectileSpread = function(self, projectileType, projectileParams, info, numProjectiles)
 				if projectileParams then
-					local gunAccuracy = getGunSliderValue("GunAccuracy", 10)
-					projectileParams.ProjectileAccuracy = gunAccuracy
+					projectileParams.ProjectileAccuracy = 1
 					if projectileParams.ShotgunRoundAccuracy then
-						projectileParams.ShotgunRoundAccuracy = gunAccuracy
+						projectileParams.ShotgunRoundAccuracy = 1
 					end
 				end
 
@@ -2492,66 +2504,11 @@ function applyPlayerEditor()
 		applyPlayerCharacterHook("EnterRagdoll", CONFIG.NoRagdoll, function() end)
 		applyPlayerCharacterHook("ToggleSelfRagdoll", CONFIG.NoRagdoll, function() end)
 
-		if CONFIG.RollLimit then
-			rememberTableHook(playerEditorOriginals.PlayerCharacter, playerCharacter, "CanRoll")
-			playerCharacter.CanRoll = function(self)
-				if type(self) == "table" then
-					if self.Dead or self.IsDead or self.Ragdolled or self.IsRagdolled then
-						return false
-					end
-
-					if self.IsRolling or self.Rolling then
-						return false
-					end
-				end
-
-				if os.clock() - rollLimitLastRoll < 0.18 then
-					return false
-				end
-
-				return true
-			end
-
-			rememberTableHook(playerEditorOriginals.PlayerCharacter, playerCharacter, "Roll")
-			playerCharacter.Roll = function(self, ...)
-				if os.clock() - rollLimitLastRoll < 0.18 then
-					return nil
-				end
-
-				rollLimitLastRoll = os.clock()
-				lastRollCharacter = self
-
-				local original = getOriginalFunction(playerEditorOriginals.PlayerCharacter, "Roll")
-				local result = nil
-				if original then
-					result = original(self, ...)
-				end
-
-				task.delay(0.28, function()
-					if unloaded or not CONFIG.RollLimit then
-						return
-					end
-
-					if type(self) == "table" then
-						pcall(function()
-							self.RollDebounce = false
-						end)
-					end
-				end)
-
-				task.delay(0.9, function()
-					if unloaded then
-						return
-					end
-
-					clearRollMovementState(self)
-				end)
-
-				return result
-			end
-		else
-			restoreTableHook(playerEditorOriginals.PlayerCharacter, playerCharacter, "CanRoll")
-			restoreTableHook(playerEditorOriginals.PlayerCharacter, playerCharacter, "Roll")
+		local hadRollHook = playerEditorOriginals.PlayerCharacter.CanRoll ~= nil
+			or playerEditorOriginals.PlayerCharacter.Roll ~= nil
+		restoreTableHook(playerEditorOriginals.PlayerCharacter, playerCharacter, "CanRoll")
+		restoreTableHook(playerEditorOriginals.PlayerCharacter, playerCharacter, "Roll")
+		if hadRollHook then
 			clearRollMovementState()
 		end
 	end
@@ -2592,6 +2549,39 @@ function restorePlayerEditor()
 			restoreTableHook(playerEditorOriginals.Network, network, key)
 		end
 	end
+end
+
+function suicideSelf()
+	local global = getHorseGlobalModule()
+
+	pcall(function()
+		local state = global and global.ReplicatedState and global.ReplicatedState.State
+		if state then
+			state.Health = 0
+		end
+	end)
+
+	local entity = getLocalEntityModel() or localPlayer.Character
+	local humanoid = entity and (entity:FindFirstChild("Humanoid") or entity:FindFirstChildWhichIsA("Humanoid", true))
+	if humanoid then
+		pcall(function()
+			humanoid.Health = 0
+		end)
+	end
+
+	pcall(function()
+		local network = global and global.Network
+		if not network then
+			return
+		end
+
+		local originalFire = getOriginalFunction(playerEditorOriginals.Network, "FireServer")
+		if originalFire then
+			originalFire(network, "DamageSelf", 999)
+		else
+			network:FireServer("DamageSelf", 999)
+		end
+	end)
 end
 
 function getFreecamCharacterParts()
@@ -3061,37 +3051,29 @@ function applyInfStamina()
 		end
 		staminaState = nil
 		restoreValueOriginals(staminaOriginals)
-		applyPlayerCharacterHook("LowerStamina", false, function() end)
 		return
 	end
 
-	applyPlayerCharacterHook("LowerStamina", true, function() end)
-	setValueWithOriginal(staminaOriginals, findParamPath({ "Params", "Character", "JumpStaminaCost" }), 0)
-	setValueWithOriginal(staminaOriginals, findParamPath({ "Params", "Character", "RollStaminaCost" }), 0)
-
 	if not staminaState then
 		pcall(function()
-			local globalModule = ReplicatedStorage:FindFirstChild("SharedModules")
-				and ReplicatedStorage.SharedModules:FindFirstChild("Global")
-			local global = globalModule and require(globalModule)
-			staminaState = global and global.ReplicatedState and global.ReplicatedState.State or nil
+			staminaState = require(ReplicatedStorage.SharedModules.Global).ReplicatedState.State
 		end)
 	end
 
-	if staminaHeartbeatConnection then
-		staminaHeartbeatConnection:Disconnect()
-		staminaHeartbeatConnection = nil
-	end
+	if staminaState and not staminaHeartbeatConnection then
+		staminaHeartbeatConnection = RunService.Heartbeat:Connect(function()
+			if unloaded or not CONFIG.InfStamina then
+				if staminaHeartbeatConnection then
+					staminaHeartbeatConnection:Disconnect()
+					staminaHeartbeatConnection = nil
+				end
+				return
+			end
 
-	if staminaState then
-		local now = os.clock()
-		if now - lastStaminaFill >= 0.2 then
-			lastStaminaFill = now
-			local stamina = staminaState.Stamina
-			if stamina and stamina < 100 then
+			if staminaState.Stamina and staminaState.Stamina < 100 then
 				staminaState.Stamina = 100
 			end
-		end
+		end)
 	end
 end
 
@@ -3378,10 +3360,10 @@ function resetHorseFeatureValues()
 		restoreHorseModFields({ "Boosts", "MaxBoosts" })
 	end
 	if not CONFIG.HorseNoRagdoll then
-		restoreHorseModFields({ "KnockOut" })
+		restoreHorseModFields(HORSE_RAGDOLL_FIELDS)
 	end
 	if not CONFIG.HorseNoWaterSlowdown then
-		restoreHorseModFields({ "Swimming" })
+		restoreHorseModFields(HORSE_WATER_FIELDS)
 	end
 
 	local horse = getCurrentHorse()
@@ -3431,6 +3413,8 @@ function applyHorseNoWaterSlowdown(horse)
 		return
 	end
 
+	setHorseModField(horse, "InWater", false)
+	setHorseModField(horse, "IsInWater", false)
 	setHorseModField(horse, "Swimming", false)
 end
 
@@ -3749,6 +3733,50 @@ applyTheme = function()
 		creditsLabel.BackgroundColor3 = CONFIG.ThemeForegroundColor:Lerp(CONFIG.ThemeBackgroundColor, 0.25)
 		creditsLabel.TextColor3 = CONFIG.ThemeTextColor
 	end
+
+	for _, label in ipairs(themeDividers) do
+		if label and label.Parent then
+			label.BackgroundColor3 = CONFIG.ThemeBackgroundColor
+			label.TextColor3 = CONFIG.ThemeTextColor:Lerp(CONFIG.ThemeBackgroundColor, 0.25)
+		end
+	end
+end
+
+function makeDivider(parent, titleText, order)
+	local holder = Instance.new("Frame")
+	holder.Size = UDim2.new(1, 0, 0, 28)
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.LayoutOrder = order
+	holder.ZIndex = 12
+	holder.Parent = parent
+
+	local line = Instance.new("Frame")
+	line.AnchorPoint = Vector2.new(0, 0.5)
+	line.Position = UDim2.new(0, 0, 0.5, 0)
+	line.Size = UDim2.new(1, 0, 0, 1)
+	line.BackgroundColor3 = Color3.fromRGB(58, 62, 76)
+	line.BackgroundTransparency = 0.35
+	line.BorderSizePixel = 0
+	line.ZIndex = 12
+	line.Parent = holder
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromOffset(150, 22)
+	label.Position = UDim2.fromOffset(8, 3)
+	label.BackgroundColor3 = CONFIG.ThemeBackgroundColor
+	label.BackgroundTransparency = 0
+	label.BorderSizePixel = 0
+	label.Text = titleText
+	label.TextColor3 = CONFIG.ThemeTextColor:Lerp(CONFIG.ThemeBackgroundColor, 0.25)
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.ZIndex = 13
+	label.Parent = holder
+	table.insert(themeDividers, label)
+
+	return holder
 end
 
 function makeSlider(parent, labelText, minValue, maxValue, defaultValue, order, callback, displayFormatter)
@@ -3862,9 +3890,9 @@ setHitChanceSlider = nil
 setMaxTargetDistanceSlider = nil
 setTargetTextSizeSlider = nil
 setSoftAimOffsetSlider = nil
+setSoftAimPredictionSlider = nil
 setGunReloadSpeedSlider = nil
 setGunFireRateSlider = nil
-setGunAccuracySlider = nil
 setWorldDrawDistanceSlider = nil
 setCameraFOVSlider = nil
 setWorldTextSizeSlider = nil
@@ -3897,7 +3925,7 @@ graphicsHorseSection = makeSection(graphicsLeftPane, "Horse Features", 4, 3)
 settingsControlsSection = makeSection(settingsLeftPane, "Controls", 1, 2)
 settingsServerSection = makeSection(settingsLeftPane, "Servers", 2, 2)
 settingsScriptSection = makeSection(settingsLeftPane, "Script", 3, 1)
-settingsCharacterSection = makeSection(settingsLeftPane, "Character", 4, 2)
+settingsCharacterSection = makeSection(settingsLeftPane, "Character", 4, 3)
 settingsFreecamSection = makeSection(settingsLeftPane, "Freecam", 5, 1)
 
 enabledButton = makeToggleButton(aimCoreSection, "Soft Aim", 1)
@@ -3909,6 +3937,7 @@ showFOVButton = makeToggleButton(aimCoreSection, "Fov", 6)
 wallCheckButton = makeToggleButton(aimTargetingSection, "Wall Check", 1)
 antiFactionButton = makeToggleButton(aimTargetingSection, "Anti Faction", 2)
 deadCheckButton = makeToggleButton(aimTargetingSection, "Dead Check", 3)
+predictionButton = makeToggleButton(aimTargetingSection, "Prediction", 4)
 playersButton = makeToggleButton(aimTargetFilterSection, "Players", 1)
 animalsButton = makeToggleButton(aimTargetFilterSection, "Animals", 2)
 npcsButton = makeToggleButton(aimTargetFilterSection, "NPCs", 3)
@@ -3936,9 +3965,8 @@ walkSpeedButton = makeToggleButton(graphicsPlayerSection, "WalkSpeed", 4)
 autoSprintButton = makeToggleButton(graphicsPlayerSection, "Auto Sprint", 5)
 noRagdollButton = makeToggleButton(graphicsPlayerSection, "No Ragdoll", 6)
 noFallDamageButton = makeToggleButton(graphicsPlayerSection, "No Fall Damage", 7)
-rollLimitButton = makeToggleButton(graphicsPlayerSection, "Roll Limit", 8)
-opLassoButton = makeToggleButton(graphicsPlayerSection, "Op Lasso", 9)
-animalResizerButton = makeToggleButton(graphicsPlayerSection, "Easy Hunt", 10)
+opLassoButton = makeToggleButton(graphicsPlayerSection, "Op Lasso", 8)
+animalResizerButton = makeToggleButton(graphicsPlayerSection, "Easy Hunt", 9)
 horseAutoSprintButton = makeToggleButton(graphicsHorseSection, "Auto Sprint", 1)
 horseInfStaminaButton = makeToggleButton(graphicsHorseSection, "Inf Stamina", 2)
 horseNoRagdollButton = makeToggleButton(graphicsHorseSection, "Anti Ragdoll", 3)
@@ -4181,51 +4209,55 @@ setTargetTextSizeSlider = makeSlider(rightPane, "Target Text Size", 8, 28, CONFI
 	lastVisualTextSize = nil
 end)
 
-makeColorPicker(rightPane, "Fov Color", 5, CONFIG.FOVColor, applyAccent)
-makeColorPicker(rightPane, "Target Color", 6, CONFIG.TargetColor, applyTargetAccent)
-makeColorPicker(rightPane, "Target Behind Wall Color", 7, CONFIG.TargetBehindWallColor, applyTargetBehindWallAccent)
-
 function formatOffset(value)
 	return string.format("%.2f", value / 100)
 end
 
-setSoftAimOffsetSlider = makeSlider(rightPane, "Softaim Offset", -100, 200, CONFIG.SoftAimYOffset, 8, function(value)
+setSoftAimOffsetSlider = makeSlider(rightPane, "Softaim Offset", -100, 200, CONFIG.SoftAimYOffset, 5, function(value)
 	CONFIG.SoftAimYOffset = value
 	randomHitCache = {}
 	lastTargetScan = 0
 end, formatOffset)
 
-makeSlider(rightPane, "NPC Resolver", -100, 1000, CONFIG.NPCSoftAimResolver, 9, function(value)
+makeSlider(rightPane, "NPC Resolver", -100, 1000, CONFIG.NPCSoftAimResolver, 6, function(value)
 	CONFIG.NPCSoftAimResolver = value
 	randomHitCache = {}
 	currentTarget = nil
 	lastTargetScan = 0
 end, formatOffset)
 
+function formatPrediction(value)
+	return string.format("%.2f", value / 100)
+end
+
+setSoftAimPredictionSlider = makeSlider(rightPane, "Prediction", 0, 100, CONFIG.SoftAimPredictionAmount, 7, function(value)
+	CONFIG.SoftAimPredictionAmount = value
+	currentTarget = nil
+	lastTargetScan = 0
+end, formatPrediction)
+
 function formatGunDecimal(value)
 	return string.format("%.1fx", value / 10)
 end
 
-setGunReloadSpeedSlider = makeSlider(rightPane, "Reload Speed", 10, 100, CONFIG.GunReloadSpeed, 10, function(value)
+setGunReloadSpeedSlider = makeSlider(rightPane, "Reload Speed", 10, 100, CONFIG.GunReloadSpeed, 8, function(value)
 	CONFIG.GunReloadSpeed = value
 	if CONFIG.FastReload then
 		applyGunMods()
 	end
 end, formatGunDecimal)
 
-setGunFireRateSlider = makeSlider(rightPane, "Fire Rate", 10, 100, CONFIG.GunFireRate, 11, function(value)
+setGunFireRateSlider = makeSlider(rightPane, "Fire Rate", 10, 100, CONFIG.GunFireRate, 9, function(value)
 	CONFIG.GunFireRate = value
 	if CONFIG.FireRate then
 		applyGunMods()
 	end
 end, formatGunDecimal)
 
-setGunAccuracySlider = makeSlider(rightPane, "Gun Accuracy", 10, 100, CONFIG.GunAccuracy, 12, function(value)
-	CONFIG.GunAccuracy = value
-	if CONFIG.NoSpread then
-		applyGunMods()
-	end
-end, formatGunDecimal)
+makeDivider(rightPane, "Aim Colors", 10)
+makeColorPicker(rightPane, "Fov Color", 11, CONFIG.FOVColor, applyAccent)
+makeColorPicker(rightPane, "Target Color", 12, CONFIG.TargetColor, applyTargetAccent)
+makeColorPicker(rightPane, "Target Behind Wall Color", 13, CONFIG.TargetBehindWallColor, applyTargetBehindWallAccent)
 
 worldEnabledButton = makeToggleButton(viewMainSection, "ESP", 1)
 worldChamsButton = makeToggleButton(viewMainSection, "Chams", 2)
@@ -4278,12 +4310,14 @@ setWorldDrawDistanceSlider = makeSlider(worldRightPane, "ESP Max Draw Distance",
 	end
 end, formatDistance)
 
-setWorldTextSizeSlider = makeSlider(worldRightPane, "ESP Text Size", 8, 28, CONFIG.WorldTextSize, 3, function(value)
+setWorldTextSizeSlider = makeSlider(worldRightPane, "ESP Text Size", 8, 28, CONFIG.WorldTextSize, 2, function(value)
 	CONFIG.WorldTextSize = value
 	if refreshWorldESP then
 		refreshWorldESP(true)
 	end
 end)
+
+makeDivider(worldRightPane, "ESP Colors", 3)
 
 makeColorPicker(worldRightPane, "Player ESP Color", 4, CONFIG.WorldPlayerColor, function(color)
 	CONFIG.WorldPlayerColor = color
@@ -4307,9 +4341,11 @@ makeColorPicker(worldRightPane, "Dropped Item Color", 7, CONFIG.DroppedItemColor
 	end
 end)
 
+makeDivider(worldRightPane, "Ore Colors", 8)
+
 for oreIndex, oreGroupName in ipairs(ORE_GROUP_ORDER) do
 	local groupName = oreGroupName
-	makeColorPicker(worldRightPane, groupName .. " Ore Color", oreIndex + 7, CONFIG.OreColors[groupName], function(color)
+	makeColorPicker(worldRightPane, groupName .. " Ore Color", oreIndex + 8, CONFIG.OreColors[groupName], function(color)
 		CONFIG.OreColors[groupName] = color
 		if refreshOreESP then
 			refreshOreESP(true)
@@ -4317,7 +4353,9 @@ for oreIndex, oreGroupName in ipairs(ORE_GROUP_ORDER) do
 	end)
 end
 
-makeColorPicker(lootRightPane, "Gold Bar Color", 1, CONFIG.LootGoldColor, function(color)
+makeDivider(lootRightPane, "Loot Colors", 1)
+
+makeColorPicker(lootRightPane, "Gold Bar Color", 2, CONFIG.LootGoldColor, function(color)
 	CONFIG.LootGoldColor = color
 	if requestLootColorApply then
 		requestLootColorApply(false)
@@ -4332,7 +4370,7 @@ makeColorPicker(lootRightPane, "Gold Bar Color", 1, CONFIG.LootGoldColor, functi
 	end
 end)
 
-makeColorPicker(lootRightPane, "Diamond Color", 2, CONFIG.LootDiamondColor, function(color)
+makeColorPicker(lootRightPane, "Diamond Color", 3, CONFIG.LootDiamondColor, function(color)
 	CONFIG.LootDiamondColor = color
 	if requestLootColorApply then
 		requestLootColorApply(false)
@@ -4404,7 +4442,7 @@ setHorseJumpPowerSlider = makeSlider(graphicsRightPane, "Horse Jump Power", 0, 8
 	CONFIG.HorseJumpPower = value
 end, formatHorseJumpPower)
 
-setFreecamSpeedSlider = makeSlider(settingsRightPane, "Freecam Speed", 1, 1000, CONFIG.FreecamSpeed, 7, function(value)
+setFreecamSpeedSlider = makeSlider(settingsRightPane, "Freecam Speed", 1, 1000, CONFIG.FreecamSpeed, 1, function(value)
 	CONFIG.FreecamSpeed = value
 end)
 
@@ -4424,6 +4462,7 @@ dragonIRLButton = makeToggleButton(settingsCharacterSection, "Dragon IRL", 1)
 giantModeButton = makeToggleButton(settingsCharacterSection, "Giant Mode", 2)
 freeBallButton = makeToggleButton(settingsCharacterSection, "Free Ball", 3)
 sitButton = makeButton(settingsCharacterSection, "Sit", 4)
+suicideButton = makeButton(settingsCharacterSection, "Suicide", 5)
 freecamButton = makeToggleButton(settingsFreecamSection, "Freecam", 1)
 freecamKeyButton = makeButton(settingsFreecamSection, "", 2)
 
@@ -4436,39 +4475,41 @@ creditsLabel.TextColor3 = Color3.fromRGB(226, 230, 240)
 creditsLabel.Font = Enum.Font.GothamMedium
 creditsLabel.TextSize = 13
 creditsLabel.TextWrapped = true
-creditsLabel.LayoutOrder = 1
+creditsLabel.LayoutOrder = 8
 creditsLabel.ZIndex = 12
 creditsLabel.Parent = settingsRightPane
 table.insert(themeSurfaces, creditsLabel)
 makeCorner(creditsLabel, 9)
 makeStroke(creditsLabel, Color3.fromRGB(56, 60, 74), 1, 0.38)
 
-makeColorPicker(settingsRightPane, "Text Color", 2, CONFIG.ThemeTextColor, function(color)
+makeDivider(settingsRightPane, "Theme Colors", 2)
+
+makeColorPicker(settingsRightPane, "Text Color", 3, CONFIG.ThemeTextColor, function(color)
 	CONFIG.ThemeTextColor = color
 	if applyTheme then
 		applyTheme()
 	end
 end)
 
-makeColorPicker(settingsRightPane, "Background Color", 3, CONFIG.ThemeBackgroundColor, function(color)
+makeColorPicker(settingsRightPane, "Background Color", 4, CONFIG.ThemeBackgroundColor, function(color)
 	CONFIG.ThemeBackgroundColor = color
 	if applyTheme then
 		applyTheme()
 	end
 end)
 
-makeColorPicker(settingsRightPane, "Foreground Color", 4, CONFIG.ThemeForegroundColor, function(color)
+makeColorPicker(settingsRightPane, "Foreground Color", 5, CONFIG.ThemeForegroundColor, function(color)
 	CONFIG.ThemeForegroundColor = color
 	if applyTheme then
 		applyTheme()
 	end
 end)
 
-makeColorPicker(settingsRightPane, "Notification Color", 5, CONFIG.NotificationColor, function(color)
+makeColorPicker(settingsRightPane, "Notification Color", 6, CONFIG.NotificationColor, function(color)
 	CONFIG.NotificationColor = color
 end)
 
-makeColorPicker(settingsRightPane, "Notification Background", 6, CONFIG.NotificationBackgroundColor, function(color)
+makeColorPicker(settingsRightPane, "Notification Background", 7, CONFIG.NotificationBackgroundColor, function(color)
 	CONFIG.NotificationBackgroundColor = color
 end)
 
@@ -4547,6 +4588,7 @@ function refreshGui()
 	setToggleDisplay(wallCheckButton, "Wall Check", CONFIG.TargetWallCheck)
 	setToggleDisplay(antiFactionButton, "Anti Faction", CONFIG.AntiFaction)
 	setToggleDisplay(deadCheckButton, "Dead Check", CONFIG.DeadCheck)
+	setToggleDisplay(predictionButton, "Prediction", CONFIG.SoftAimPrediction)
 	setToggleDisplay(noRecoilButton, "No Recoil", CONFIG.NoRecoil)
 	setToggleDisplay(wallbangButton, "Wallbang", CONFIG.Wallbang)
 	setToggleDisplay(fastReloadButton, "Fast Reload", CONFIG.FastReload)
@@ -4569,7 +4611,6 @@ function refreshGui()
 	setToggleDisplay(autoSprintButton, "Auto Sprint", CONFIG.AutoSprint)
 	setToggleDisplay(noRagdollButton, "No Ragdoll", CONFIG.NoRagdoll)
 	setToggleDisplay(noFallDamageButton, "No Fall Damage", CONFIG.NoFallDamage)
-	setToggleDisplay(rollLimitButton, "Roll Limit", CONFIG.RollLimit)
 	setToggleDisplay(animalResizerButton, "Easy Hunt", CONFIG.AnimalResizer)
 	setToggleDisplay(horseAutoSprintButton, "Auto Sprint", CONFIG.HorseAutoSprint)
 	setToggleDisplay(horseInfStaminaButton, "Inf Stamina", CONFIG.HorseInfStamina)
@@ -5105,6 +5146,13 @@ deadCheckButton.MouseButton1Click:Connect(function()
 	refreshGui()
 end)
 
+predictionButton.MouseButton1Click:Connect(function()
+	CONFIG.SoftAimPrediction = not CONFIG.SoftAimPrediction
+	currentTarget = nil
+	lastTargetScan = 0
+	refreshGui()
+end)
+
 noRecoilButton.MouseButton1Click:Connect(function()
 	CONFIG.NoRecoil = not CONFIG.NoRecoil
 	applyNoRecoil()
@@ -5270,12 +5318,6 @@ noFallDamageButton.MouseButton1Click:Connect(function()
 	refreshGui()
 end)
 
-rollLimitButton.MouseButton1Click:Connect(function()
-	CONFIG.RollLimit = not CONFIG.RollLimit
-	applyPlayerEditor()
-	refreshGui()
-end)
-
 horseAutoSprintButton.MouseButton1Click:Connect(function()
 	CONFIG.HorseAutoSprint = not CONFIG.HorseAutoSprint
 	if CONFIG.HorseAutoSprint then
@@ -5301,7 +5343,7 @@ horseNoRagdollButton.MouseButton1Click:Connect(function()
 	if CONFIG.HorseNoRagdoll then
 		updateHorseFeatures()
 	else
-		restoreHorseModFields({ "KnockOut" })
+		restoreHorseModFields(HORSE_RAGDOLL_FIELDS)
 	end
 	refreshGui()
 end)
@@ -5311,7 +5353,7 @@ horseNoWaterButton.MouseButton1Click:Connect(function()
 	if CONFIG.HorseNoWaterSlowdown then
 		updateHorseFeatures()
 	else
-		restoreHorseModFields({ "Swimming" })
+		restoreHorseModFields(HORSE_WATER_FIELDS)
 	end
 	refreshGui()
 end)
@@ -5712,6 +5754,10 @@ sitButton.MouseButton1Click:Connect(function()
 	if humanoid then
 		humanoid.Sit = true
 	end
+end)
+
+suicideButton.MouseButton1Click:Connect(function()
+	suicideSelf()
 end)
 
 ragdollKeyButton.MouseButton1Click:Connect(function()
@@ -7357,6 +7403,83 @@ function getAimOffsetVector(groupName)
 	return getOffsetVector(CONFIG.SoftAimYOffset + (groupName == "NPC" and CONFIG.NPCSoftAimResolver or 0))
 end
 
+function sanitizePredictionVelocity(velocity)
+	if typeof(velocity) ~= "Vector3" then
+		return Vector3.new(0, 0, 0)
+	end
+
+	velocity = Vector3.new(velocity.X, 0, velocity.Z)
+	local magnitude = velocity.Magnitude
+	if magnitude > 220 then
+		return velocity.Unit * 220
+	end
+
+	return velocity
+end
+
+function readPredictionVelocity(model, part)
+	local root = getRootPart(model) or part
+	local velocity = Vector3.new(0, 0, 0)
+
+	if root and root:IsA("BasePart") then
+		velocity = sanitizePredictionVelocity(root.AssemblyLinearVelocity)
+		if velocity.Magnitude < 1 then
+			velocity = sanitizePredictionVelocity(root.Velocity)
+		end
+	end
+
+	local humanoid = model and (model:FindFirstChild("Humanoid") or model:FindFirstChildWhichIsA("Humanoid", true))
+	if velocity.Magnitude < 1 and humanoid then
+		local ok, moveDirection = pcall(function()
+			return humanoid.MoveDirection
+		end)
+		local speed = tonumber(humanoid.WalkSpeed) or 16
+		if ok and typeof(moveDirection) == "Vector3" and moveDirection.Magnitude > 0.05 then
+			velocity = sanitizePredictionVelocity(moveDirection.Unit * speed)
+		end
+	end
+
+	local now = os.clock()
+	if root and root:IsA("BasePart") then
+		local cached = softAimPredictionCache[model or root]
+		if velocity.Magnitude < 1 and cached and cached.Position then
+			local delta = now - (cached.Time or now)
+			if delta > 0.02 and delta < 0.5 then
+				velocity = sanitizePredictionVelocity((root.Position - cached.Position) / delta)
+			end
+		end
+
+		softAimPredictionCache[model or root] = {
+			Position = root.Position,
+			Time = now
+		}
+	end
+
+	return velocity
+end
+
+function applySoftAimPrediction(model, part, position)
+	if not CONFIG.SoftAimPrediction or not position then
+		return position
+	end
+
+	local prediction = math.clamp((tonumber(CONFIG.SoftAimPredictionAmount) or 0) / 100, 0, 1.25)
+	if prediction <= 0 then
+		return position
+	end
+
+	local velocity = readPredictionVelocity(model, part)
+	if velocity.Magnitude <= 0.5 then
+		return position
+	end
+
+	return position + (velocity * prediction)
+end
+
+function finishAimPoint(model, part, position)
+	return part, applySoftAimPrediction(model, part, position)
+end
+
 function getAimPoint(model, groupName)
 	local root = getRootPart(model)
 	if not root then
@@ -7367,12 +7490,12 @@ function getAimPoint(model, groupName)
 
 	if CONFIG.HitPart == "Head" then
 		local part = getDirectPart(model, { "Head" }) or root
-		return part, part.Position + softAimOffset
+		return finishAimPoint(model, part, part.Position + softAimOffset)
 	end
 
 	if CONFIG.HitPart == "Torso" then
 		local part = getDirectPart(model, { "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart" }) or root
-		return part, part.Position + softAimOffset
+		return finishAimPoint(model, part, part.Position + softAimOffset)
 	end
 
 	if CONFIG.HitPart == "Feet" then
@@ -7380,15 +7503,15 @@ function getAimPoint(model, groupName)
 		local right = getDirectPart(model, { "RightFoot", "RightLowerLeg", "Right Leg" })
 
 		if left and right then
-			return left, ((left.Position + right.Position) / 2) + softAimOffset
+			return finishAimPoint(model, left, ((left.Position + right.Position) / 2) + softAimOffset)
 		end
 
 		local foot = left or right
 		if foot then
-			return foot, foot.Position + softAimOffset
+			return finishAimPoint(model, foot, foot.Position + softAimOffset)
 		end
 
-		return root, root.Position - Vector3.new(0, 2.5, 0) + softAimOffset
+		return finishAimPoint(model, root, root.Position - Vector3.new(0, 2.5, 0) + softAimOffset)
 	end
 
 	if CONFIG.HitPart == "Random" then
@@ -7396,7 +7519,7 @@ function getAimPoint(model, groupName)
 		local cached = randomHitCache[model]
 
 		if cached and cached.Part and cached.Part.Parent and now - cached.Time < 0.45 then
-			return cached.Part, cached.Part.Position + softAimOffset
+			return finishAimPoint(model, cached.Part, cached.Part.Position + softAimOffset)
 		end
 
 		local candidates = {}
@@ -7428,10 +7551,10 @@ function getAimPoint(model, groupName)
 			Time = now
 		}
 
-		return chosen, chosen.Position + softAimOffset
+		return finishAimPoint(model, chosen, chosen.Position + softAimOffset)
 	end
 
-	return root, root.Position + softAimOffset
+	return finishAimPoint(model, root, root.Position + softAimOffset)
 end
 
 function addCandidate(model, seen, groupName)
@@ -10171,6 +10294,12 @@ function getSoftAimDirection(origin, fallbackDirection)
 	currentTarget = target
 
 	if target and typeof(origin) == "Vector3" then
+		local part, position = getAimPoint(target.Model, target.Group)
+		if part and position then
+			target.Part = part
+			target.Position = position
+		end
+
 		local direction = target.Position - origin
 
 		if direction.Magnitude > 0 and passesHitChance() then
@@ -10379,7 +10508,6 @@ unloadScript = function()
 	CONFIG.AutoSprint = false
 	CONFIG.NoRagdoll = false
 	CONFIG.NoFallDamage = false
-	CONFIG.RollLimit = false
 	CONFIG.BoostFPS = false
 	CONFIG.DragonIRL = false
 	CONFIG.GiantMode = false
@@ -10388,6 +10516,7 @@ unloadScript = function()
 	CONFIG.InfStamina = false
 	CONFIG.FasterRoll = false
 	CONFIG.WalkSpeedEnabled = false
+	CONFIG.SoftAimPrediction = false
 	CONFIG.HorseAutoSprint = false
 	CONFIG.HorseInfStamina = false
 	CONFIG.HorseNoRagdoll = false
@@ -10615,12 +10744,16 @@ RunService:BindToRenderStep("SoftAimLocalAssist", Enum.RenderPriority.Last.Value
 		end
 	end
 
-	if (CONFIG.AutoSprint or CONFIG.NoRagdoll or CONFIG.NoFallDamage or CONFIG.RollLimit) and now - lastPlayerEditorUpdate >= 2 then
+	if (CONFIG.AutoSprint or CONFIG.NoRagdoll or CONFIG.NoFallDamage) and now - lastPlayerEditorUpdate >= 2 then
 		lastPlayerEditorUpdate = now
 		applyPlayerEditor()
 	end
 
-	local horseFeatureInterval = (CONFIG.HorseAutoSprint or CONFIG.HorseSpeedEnabled or CONFIG.HorseJumpPowerEnabled) and 0.1 or 0.75
+	local horseFeatureInterval = (CONFIG.HorseAutoSprint
+		or CONFIG.HorseSpeedEnabled
+		or CONFIG.HorseJumpPowerEnabled
+		or CONFIG.HorseNoRagdoll
+		or CONFIG.HorseNoWaterSlowdown) and 0.05 or 0.75
 	if (
 		CONFIG.HorseAutoSprint
 		or CONFIG.HorseInfStamina
