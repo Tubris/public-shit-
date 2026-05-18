@@ -1,0 +1,534 @@
+-- Universal TP For Faggots
+-- nick and dragon
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local localPlayer = Players.LocalPlayer
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "UniversalTP"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 360, 0, 135)
+mainFrame.Position = UDim2.new(0, 10, 0.5, -67)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+mainFrame.ZIndex = 999
+mainFrame.Visible = true
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = mainFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 1
+stroke.Color = Color3.fromRGB(70, 70, 100)
+stroke.Transparency = 0.5
+stroke.Parent = mainFrame
+
+-- MINIMIZE BUTTON (-)
+local minButton = Instance.new("TextButton")
+minButton.Size = UDim2.new(0, 25, 0, 25)
+minButton.Position = UDim2.new(1, -60, 0, 5)
+minButton.Text = "-"
+minButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minButton.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+minButton.Font = Enum.Font.GothamBold
+minButton.TextSize = 18
+minButton.Parent = mainFrame
+minButton.ZIndex = 999
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minButton
+
+-- CLOSE BUTTON (X)
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 25, 0, 25)
+closeButton.Position = UDim2.new(1, -30, 0, 5)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+closeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.Parent = mainFrame
+closeButton.ZIndex = 999
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeButton
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -90, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 5)
+title.BackgroundTransparency = 1
+title.Text = "Universal TP For Faggots"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = mainFrame
+title.ZIndex = 999
+
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, 0, 0, 15)
+subtitle.Position = UDim2.new(0, 0, 0, 32)
+subtitle.BackgroundTransparency = 1
+subtitle.Text = "nick and dragon"
+subtitle.TextColor3 = Color3.fromRGB(150, 150, 170)
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextSize = 9
+subtitle.Parent = mainFrame
+subtitle.ZIndex = 999
+
+local xLabel = Instance.new("TextLabel")
+xLabel.Size = UDim2.new(0, 20, 0, 20)
+xLabel.Position = UDim2.new(0, 8, 0, 52)
+xLabel.BackgroundTransparency = 1
+xLabel.Text = "X:"
+xLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+xLabel.Font = Enum.Font.GothamBold
+xLabel.TextSize = 12
+xLabel.Parent = mainFrame
+xLabel.ZIndex = 999
+
+local xInput = Instance.new("TextBox")
+xInput.Size = UDim2.new(0, 85, 0, 22)
+xInput.Position = UDim2.new(0, 28, 0, 51)
+xInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+xInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+xInput.Font = Enum.Font.Gotham
+xInput.TextSize = 11
+xInput.Text = ""
+xInput.PlaceholderText = "X"
+xInput.Parent = mainFrame
+xInput.ZIndex = 999
+
+local yLabel = Instance.new("TextLabel")
+yLabel.Size = UDim2.new(0, 20, 0, 20)
+yLabel.Position = UDim2.new(0, 128, 0, 52)
+yLabel.BackgroundTransparency = 1
+yLabel.Text = "Y:"
+yLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+yLabel.Font = Enum.Font.GothamBold
+yLabel.TextSize = 12
+yLabel.Parent = mainFrame
+yLabel.ZIndex = 999
+
+local yInput = Instance.new("TextBox")
+yInput.Size = UDim2.new(0, 85, 0, 22)
+yInput.Position = UDim2.new(0, 148, 0, 51)
+yInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+yInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+yInput.Font = Enum.Font.Gotham
+yInput.TextSize = 11
+yInput.Text = ""
+yInput.PlaceholderText = "Y"
+yInput.Parent = mainFrame
+yInput.ZIndex = 999
+
+local zLabel = Instance.new("TextLabel")
+zLabel.Size = UDim2.new(0, 20, 0, 20)
+zLabel.Position = UDim2.new(0, 248, 0, 52)
+zLabel.BackgroundTransparency = 1
+zLabel.Text = "Z:"
+zLabel.TextColor3 = Color3.fromRGB(100, 150, 255)
+zLabel.Font = Enum.Font.GothamBold
+zLabel.TextSize = 12
+zLabel.Parent = mainFrame
+zLabel.ZIndex = 999
+
+local zInput = Instance.new("TextBox")
+zInput.Size = UDim2.new(0, 85, 0, 22)
+zInput.Position = UDim2.new(0, 268, 0, 51)
+zInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+zInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+zInput.Font = Enum.Font.Gotham
+zInput.TextSize = 11
+zInput.Text = ""
+zInput.PlaceholderText = "Z"
+zInput.Parent = mainFrame
+zInput.ZIndex = 999
+
+local tpButton = Instance.new("TextButton")
+tpButton.Size = UDim2.new(1, -16, 0, 30)
+tpButton.Position = UDim2.new(0, 8, 0, 95)
+tpButton.Text = "TELEPORT"
+tpButton.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
+tpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpButton.Font = Enum.Font.GothamBold
+tpButton.TextSize = 12
+tpButton.Parent = mainFrame
+tpButton.ZIndex = 999
+
+local buttonCorner = Instance.new("UICorner")
+buttonCorner.CornerRadius = UDim.new(0, 6)
+buttonCorner.Parent = tpButton
+
+-- MINIMIZED STATE
+local minimized = false
+local originalSize = mainFrame.Size
+local minimizedSize = UDim2.new(0, 360, 0, 40)
+
+-- HIDE/SHOW CONTENT FUNCTION
+local function setMinimized(state)
+    minimized = state
+    if minimized then
+        mainFrame.Size = minimizedSize
+        title.Size = UDim2.new(1, -90, 0, 30)
+        title.Position = UDim2.new(0, 0, 0, 5)
+        subtitle.Visible = false
+        xLabel.Visible = false
+        xInput.Visible = false
+        yLabel.Visible = false
+        yInput.Visible = false
+        zLabel.Visible = false
+        zInput.Visible = false
+        tpButton.Visible = false
+        minButton.Text = "+"
+    else
+        mainFrame.Size = originalSize
+        subtitle.Visible = true
+        xLabel.Visible = true
+        xInput.Visible = true
+        yLabel.Visible = true
+        yInput.Visible = true
+        zLabel.Visible = true
+        zInput.Visible = true
+        tpButton.Visible = true
+        minButton.Text = "-"
+    end
+end
+
+minButton.MouseButton1Click:Connect(function()
+    setMinimized(not minimized)
+end)
+
+-- CLOSE BUTTON - FULLY UNLOAD GUI
+closeButton.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+-- TOGGLE GUI WITH RightShift
+local guiVisible = true
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        guiVisible = not guiVisible
+        mainFrame.Visible = guiVisible
+        if guiVisible then
+            showNotification("GUI Enabled - Press RightShift to hide", 3)
+        else
+            showNotification("GUI Disabled - Press RightShift to show", 3)
+        end
+    end
+end)
+
+-- NOTIFICATION FUNCTION
+local function showNotification(msg, duration)
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Size = UDim2.new(0, 320, 0, 60)
+    notifFrame.Position = UDim2.new(0.5, -160, 1, -80)
+    notifFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    notifFrame.BackgroundTransparency = 1
+    notifFrame.BorderSizePixel = 0
+    notifFrame.Parent = screenGui
+    notifFrame.ZIndex = 1000
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 8)
+    notifCorner.Parent = notifFrame
+    
+    local notifStroke = Instance.new("UIStroke")
+    notifStroke.Thickness = 1
+    notifStroke.Color = Color3.fromRGB(0, 200, 255)
+    notifStroke.Transparency = 0.5
+    notifStroke.Parent = notifFrame
+    
+    local titleText = Instance.new("TextLabel")
+    titleText.Size = UDim2.new(1, 0, 0, 25)
+    titleText.Position = UDim2.new(0, 0, 0, 5)
+    titleText.BackgroundTransparency = 1
+    titleText.Text = "Flubison Chubison Clubison is a Grubison"
+    titleText.TextColor3 = Color3.fromRGB(255, 200, 100)
+    titleText.Font = Enum.Font.GothamBold
+    titleText.TextSize = 11
+    titleText.Parent = notifFrame
+    
+    local msgText = Instance.new("TextLabel")
+    msgText.Size = UDim2.new(1, 0, 0, 25)
+    msgText.Position = UDim2.new(0, 0, 0, 30)
+    msgText.BackgroundTransparency = 1
+    msgText.Text = msg
+    msgText.TextColor3 = Color3.fromRGB(200, 200, 255)
+    msgText.Font = Enum.Font.Gotham
+    msgText.TextSize = 11
+    msgText.Parent = notifFrame
+    
+    local fadeIn = TweenService:create(notifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 0.15})
+    fadeIn:play()
+    
+    task.wait(duration or 3)
+    
+    local fadeOut = TweenService:create(notifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1})
+    fadeOut:play()
+    task.wait(0.3)
+    notifFrame:Destroy()
+end
+
+-- TELEPORT NOTIFICATION
+local function showTeleportNotification(coords)
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Size = UDim2.new(0, 320, 0, 70)
+    notifFrame.Position = UDim2.new(0.5, -160, 1, -80)
+    notifFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    notifFrame.BackgroundTransparency = 1
+    notifFrame.BorderSizePixel = 0
+    notifFrame.Parent = screenGui
+    notifFrame.ZIndex = 1000
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 8)
+    notifCorner.Parent = notifFrame
+    
+    local notifStroke = Instance.new("UIStroke")
+    notifStroke.Thickness = 1
+    notifStroke.Color = Color3.fromRGB(0, 200, 255)
+    notifStroke.Transparency = 0.5
+    notifStroke.Parent = notifFrame
+    
+    local titleText = Instance.new("TextLabel")
+    titleText.Size = UDim2.new(1, 0, 0, 25)
+    titleText.Position = UDim2.new(0, 0, 0, 5)
+    titleText.BackgroundTransparency = 1
+    titleText.Text = "Flubison Chubison Clubison is a Grubison"
+    titleText.TextColor3 = Color3.fromRGB(255, 200, 100)
+    titleText.Font = Enum.Font.GothamBold
+    titleText.TextSize = 11
+    titleText.Parent = notifFrame
+    
+    local coordText = Instance.new("TextLabel")
+    coordText.Size = UDim2.new(1, 0, 0, 30)
+    coordText.Position = UDim2.new(0, 0, 0, 32)
+    coordText.BackgroundTransparency = 1
+    coordText.Text = "Teleported to " .. coords
+    coordText.TextColor3 = Color3.fromRGB(100, 255, 100)
+    coordText.Font = Enum.Font.GothamBold
+    coordText.TextSize = 12
+    coordText.Parent = notifFrame
+    
+    local fadeIn = TweenService:create(notifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 0.15})
+    fadeIn:play()
+    
+    task.wait(3)
+    
+    local fadeOut = TweenService:create(notifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1})
+    fadeOut:play()
+    task.wait(0.3)
+    notifFrame:Destroy()
+end
+
+-- ERROR NOTIFICATION
+local function showErrorNotification(message)
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Size = UDim2.new(0, 320, 0, 60)
+    notifFrame.Position = UDim2.new(0.5, -160, 1, -80)
+    notifFrame.BackgroundColor3 = Color3.fromRGB(35, 20, 20)
+    notifFrame.BackgroundTransparency = 1
+    notifFrame.BorderSizePixel = 0
+    notifFrame.Parent = screenGui
+    notifFrame.ZIndex = 1000
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 8)
+    notifCorner.Parent = notifFrame
+    
+    local notifStroke = Instance.new("UIStroke")
+    notifStroke.Thickness = 1
+    notifStroke.Color = Color3.fromRGB(255, 80, 80)
+    notifStroke.Transparency = 0.5
+    notifStroke.Parent = notifFrame
+    
+    local titleText = Instance.new("TextLabel")
+    titleText.Size = UDim2.new(1, 0, 0, 25)
+    titleText.Position = UDim2.new(0, 0, 0, 5)
+    titleText.BackgroundTransparency = 1
+    titleText.Text = "Flubison Chubison Clubison is a Grubison"
+    titleText.TextColor3 = Color3.fromRGB(255, 200, 100)
+    titleText.Font = Enum.Font.GothamBold
+    titleText.TextSize = 11
+    titleText.Parent = notifFrame
+    
+    local errorText = Instance.new("TextLabel")
+    errorText.Size = UDim2.new(1, 0, 0, 25)
+    errorText.Position = UDim2.new(0, 0, 0, 30)
+    errorText.BackgroundTransparency = 1
+    errorText.Text = "ERROR: " .. message
+    errorText.TextColor3 = Color3.fromRGB(255, 100, 100)
+    errorText.Font = Enum.Font.GothamBold
+    errorText.TextSize = 11
+    errorText.Parent = notifFrame
+    
+    local fadeIn = TweenService:create(notifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 0.2})
+    fadeIn:play()
+    
+    task.wait(3)
+    
+    local fadeOut = TweenService:create(notifFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1})
+    fadeOut:play()
+    task.wait(0.3)
+    notifFrame:Destroy()
+end
+
+-- DRAG SYSTEM
+local dragging = false
+local dragStart
+local frameStart
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        frameStart = mainFrame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(0, frameStart.X.Offset + delta.X, 0.5, frameStart.Y.Offset + delta.Y)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+local function teleport()
+    local character = localPlayer.Character
+    if not character then 
+        showErrorNotification("Character not found!")
+        return 
+    end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then 
+        showErrorNotification("HumanoidRootPart not found!")
+        return 
+    end
+    
+    local x = tonumber(xInput.Text)
+    local y = tonumber(yInput.Text)
+    local z = tonumber(zInput.Text)
+    local pos = rootPart.Position
+    
+    local success = false
+    local coordMsg = ""
+    
+    if x and y and z then
+        rootPart.CFrame = CFrame.new(x, y, z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", x, y, z)
+        success = true
+    elseif x and y then
+        rootPart.CFrame = CFrame.new(x, y, pos.Z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", x, y, pos.Z)
+        success = true
+    elseif x and z then
+        rootPart.CFrame = CFrame.new(x, pos.Y, z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", x, pos.Y, z)
+        success = true
+    elseif y and z then
+        rootPart.CFrame = CFrame.new(pos.X, y, z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", pos.X, y, z)
+        success = true
+    elseif x then
+        rootPart.CFrame = CFrame.new(x, pos.Y, pos.Z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", x, pos.Y, pos.Z)
+        success = true
+    elseif y then
+        rootPart.CFrame = CFrame.new(pos.X, y, pos.Z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", pos.X, y, pos.Z)
+        success = true
+    elseif z then
+        rootPart.CFrame = CFrame.new(pos.X, pos.Y, z)
+        coordMsg = string.format("(%.1f, %.1f, %.1f)", pos.X, pos.Y, z)
+        success = true
+    else
+        showErrorNotification("Enter at least one coordinate!")
+        return
+    end
+    
+    if success then
+        showTeleportNotification(coordMsg)
+    end
+    
+    TweenService:create(tpButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 255, 100)}):play()
+    task.wait(0.2)
+    TweenService:create(tpButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 150, 200)}):play()
+end
+
+tpButton.MouseButton1Click:Connect(teleport)
+
+localPlayer.CharacterAdded:Connect(function()
+    if screenGui.Parent == nil then
+        screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+    end
+end)
+
+-- Startup notification (7 seconds)
+local startupFrame = Instance.new("Frame")
+startupFrame.Size = UDim2.new(0, 320, 0, 70)
+startupFrame.Position = UDim2.new(0.5, -160, 1, -80)
+startupFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+startupFrame.BackgroundTransparency = 1
+startupFrame.BorderSizePixel = 0
+startupFrame.Parent = screenGui
+startupFrame.ZIndex = 1000
+
+local startupCorner = Instance.new("UICorner")
+startupCorner.CornerRadius = UDim.new(0, 8)
+startupCorner.Parent = startupFrame
+
+local startupStroke = Instance.new("UIStroke")
+startupStroke.Thickness = 1
+startupStroke.Color = Color3.fromRGB(0, 200, 255)
+startupStroke.Transparency = 0.5
+startupStroke.Parent = startupFrame
+
+local startupTitle = Instance.new("TextLabel")
+startupTitle.Size = UDim2.new(1, 0, 0, 25)
+startupTitle.Position = UDim2.new(0, 0, 0, 5)
+startupTitle.BackgroundTransparency = 1
+startupTitle.Text = "Flubison Chubison Clubison is a Grubison"
+startupTitle.TextColor3 = Color3.fromRGB(255, 200, 100)
+startupTitle.Font = Enum.Font.GothamBold
+startupTitle.TextSize = 11
+startupTitle.Parent = startupFrame
+
+local startupMsg = Instance.new("TextLabel")
+startupMsg.Size = UDim2.new(1, 0, 0, 30)
+startupMsg.Position = UDim2.new(0, 0, 0, 32)
+startupMsg.BackgroundTransparency = 1
+startupMsg.Text = "GUI Loaded! Press RightShift to toggle visibility"
+startupMsg.TextColor3 = Color3.fromRGB(100, 255, 100)
+startupMsg.Font = Enum.Font.GothamBold
+startupMsg.TextSize = 11
+startupMsg.Parent = startupFrame
+
+local fadeIn = TweenService:create(startupFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 0.15})
+fadeIn:play()
+
+task.wait(7)
+
+local fadeOut = TweenService:create(startupFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1})
+fadeOut:play()
+task.wait(0.3)
+startupFrame:Destroy()
