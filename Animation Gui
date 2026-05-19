@@ -1,0 +1,500 @@
+-- Aubbisons Animation Pack Menu
+local player = game.Players.LocalPlayer
+local userInputService = game:GetService("UserInputService")
+
+-- ANIMATION PACKS WITH CORRECT IDs
+local packs = {
+    {
+        name = "Robot", 
+        desc = "Stiff robotic movements",
+        ids = {
+            run = "rbxassetid://616091570",
+            walk = "rbxassetid://616095330",
+            jump = "rbxassetid://616090535",
+            fall = "rbxassetid://616087089",
+            swim = "rbxassetid://616092998",
+            climb = "rbxassetid://616086039",
+            idle = "rbxassetid://616088211"
+        }
+    },
+    {
+        name = "Ninja",
+        desc = "Sneaky, agile movements", 
+        ids = {
+            run = "rbxassetid://656118852",
+            walk = "rbxassetid://656121766",
+            jump = "rbxassetid://656117878",
+            fall = "rbxassetid://656115606",
+            swim = "rbxassetid://656119721",
+            climb = "rbxassetid://656114359",
+            idle = "rbxassetid://656117400"
+        }
+    },
+    {
+        name = "Knight",
+        desc = "Heavy, armored movement",
+        ids = {
+            run = "rbxassetid://657564596",
+            walk = "rbxassetid://657552124",
+            jump = "rbxassetid://658409194",
+            fall = "rbxassetid://657600338",
+            swim = "rbxassetid://657560551",
+            climb = "rbxassetid://658360781",
+            idle = "rbxassetid://657595757"
+        }
+    },
+    {
+        name = "Zombie",
+        desc = "Shambling, undead walk",
+        ids = {
+            run = "rbxassetid://616163682",
+            walk = "rbxassetid://616168032",
+            jump = "rbxassetid://616161997",
+            fall = "rbxassetid://616157476",
+            swim = "rbxassetid://616165109",
+            climb = "rbxassetid://616156119",
+            idle = "rbxassetid://616158929"
+        }
+    },
+    {
+        name = "Cartoony",
+        desc = "Bouncy, exaggerated animations",
+        ids = {
+            run = "rbxassetid://742638842",
+            walk = "rbxassetid://742640026",
+            jump = "rbxassetid://742637942",
+            fall = "rbxassetid://742637151",
+            swim = "rbxassetid://742639220",
+            climb = "rbxassetid://742636889",
+            idle = "rbxassetid://742637544"
+        }
+    },
+    {
+        name = "Pirate",
+        desc = "Swashbuckling sailor moves",
+        ids = {
+            run = "rbxassetid://750783738",
+            walk = "rbxassetid://750785693",
+            jump = "rbxassetid://750782230",
+            fall = "rbxassetid://750780242",
+            swim = "rbxassetid://750784579",
+            climb = "rbxassetid://750779899",
+            idle = "rbxassetid://750781874"
+        }
+    },
+    {
+        name = "Stylish",
+        desc = "Smooth, stylish movements",
+        ids = {
+            run = "rbxassetid://616140816",
+            walk = "rbxassetid://616146177", 
+            jump = "rbxassetid://616139451",
+            fall = "rbxassetid://616134815",
+            swim = "rbxassetid://616143378",
+            climb = "rbxassetid://616133594",
+            idle = "rbxassetid://616136790"
+        }
+    }
+}
+
+local currentPackName = "Robot"
+local activeCheckmark = nil
+local isApplying = false
+local savedPack = "Robot"
+
+local function savePack(name)
+    savedPack = name
+    pcall(function()
+        if setclipboard then
+            setclipboard("AnimPack:" .. name)
+        end
+    end)
+end
+
+local function loadSavedPack()
+    pcall(function()
+        if getclipboard then
+            local clip = getclipboard()
+            if clip and clip:sub(1, 9) == "AnimPack:" then
+                local name = clip:sub(10)
+                for _, pack in ipairs(packs) do
+                    if pack.name == name then
+                        savedPack = name
+                        break
+                    end
+                end
+            end
+        end
+    end)
+    return savedPack
+end
+
+local function applyPack(pack)
+    if isApplying then return false end
+    isApplying = true
+    
+    local char = player.Character
+    if not char then 
+        isApplying = false
+        return false 
+    end
+    
+    local animate = char:FindFirstChild("Animate")
+    if not animate then 
+        isApplying = false
+        return false 
+    end
+    
+    local run = animate:FindFirstChild("run")
+    if run and run:FindFirstChild("RunAnim") then
+        run.RunAnim.AnimationId = pack.ids.run
+    end
+    
+    local walk = animate:FindFirstChild("walk")
+    if walk and walk:FindFirstChild("WalkAnim") then
+        walk.WalkAnim.AnimationId = pack.ids.walk
+    end
+    
+    local jump = animate:FindFirstChild("jump")
+    if jump and jump:FindFirstChild("JumpAnim") then
+        jump.JumpAnim.AnimationId = pack.ids.jump
+    end
+    
+    local fall = animate:FindFirstChild("fall")
+    if fall and fall:FindFirstChild("FallAnim") then
+        fall.FallAnim.AnimationId = pack.ids.fall
+    end
+    
+    local swim = animate:FindFirstChild("swim")
+    if swim and swim:FindFirstChild("Swim") then
+        swim.Swim.AnimationId = pack.ids.swim
+    end
+    
+    local climb = animate:FindFirstChild("climb")
+    if climb and climb:FindFirstChild("ClimbAnim") then
+        climb.ClimbAnim.AnimationId = pack.ids.climb
+    end
+    
+    local idle = animate:FindFirstChild("idle")
+    if idle then
+        local anim1 = idle:FindFirstChild("Animation1")
+        local anim2 = idle:FindFirstChild("Animation2")
+        if anim1 then anim1.AnimationId = pack.ids.idle end
+        if anim2 then anim2.AnimationId = pack.ids.idle end
+    end
+    
+    currentPackName = pack.name
+    savePack(pack.name)
+    isApplying = false
+    return true
+end
+
+-- Create GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "AubbisonsAnimPack"
+gui.ResetOnSpawn = false
+gui.Parent = game:GetService("CoreGui")
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 300, 0, 400)
+main.Position = UDim2.new(0, 20, 0.5, -200)
+main.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+main.BackgroundTransparency = 0.05
+main.BorderSizePixel = 0
+main.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = main
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 10)
+titleCorner.Parent = titleBar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -60, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "🎬 Aubbisons Animations"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 13
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+-- Minimize button
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 25, 0, 25)
+minBtn.Position = UDim2.new(1, -55, 0, 5)
+minBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+minBtn.Text = "-"
+minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minBtn.TextSize = 14
+minBtn.Font = Enum.Font.GothamBold
+minBtn.BorderSizePixel = 0
+minBtn.Parent = titleBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 5)
+minCorner.Parent = minBtn
+
+-- Close button
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 25, 0, 25)
+closeBtn.Position = UDim2.new(1, -28, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 12
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeBtn
+
+-- Scroll frame
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, 0, 1, -70)
+scroll.Position = UDim2.new(0, 0, 0, 35)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 3
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = main
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 5)
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Parent = scroll
+
+local pad = Instance.new("UIPadding")
+pad.PaddingLeft = UDim.new(0, 8)
+pad.PaddingRight = UDim.new(0, 8)
+pad.PaddingTop = UDim.new(0, 8)
+pad.PaddingBottom = UDim.new(0, 8)
+pad.Parent = scroll
+
+-- Status bar
+local status = Instance.new("Frame")
+status.Size = UDim2.new(1, 0, 0, 30)
+status.Position = UDim2.new(0, 0, 1, -30)
+status.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+status.BorderSizePixel = 0
+status.Parent = main
+
+local statusText = Instance.new("TextLabel")
+statusText.Size = UDim2.new(1, -10, 1, 0)
+statusText.Position = UDim2.new(0, 8, 0, 0)
+statusText.BackgroundTransparency = 1
+statusText.Text = "Ready"
+statusText.TextColor3 = Color3.fromRGB(150, 150, 155)
+statusText.TextSize = 11
+statusText.Font = Enum.Font.Gotham
+statusText.TextXAlignment = Enum.TextXAlignment.Left
+statusText.Parent = status
+
+local currentText = Instance.new("TextLabel")
+currentText.Size = UDim2.new(0, 150, 1, 0)
+currentText.Position = UDim2.new(1, -155, 0, 0)
+currentText.BackgroundTransparency = 1
+currentText.Text = "Current: Robot"
+currentText.TextColor3 = Color3.fromRGB(0, 180, 100)
+currentText.TextSize = 10
+currentText.Font = Enum.Font.Gotham
+currentText.TextXAlignment = Enum.TextXAlignment.Right
+currentText.Parent = status
+
+-- Create pack buttons
+local function createPackButton(pack, index)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 60)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    btn.BackgroundTransparency = 0.3
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.LayoutOrder = index
+    btn.Parent = scroll
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = btn
+    
+    local name = Instance.new("TextLabel")
+    name.Size = UDim2.new(1, -80, 0, 22)
+    name.Position = UDim2.new(0, 10, 0, 6)
+    name.BackgroundTransparency = 1
+    name.Text = pack.name
+    name.TextColor3 = Color3.fromRGB(255, 255, 255)
+    name.TextSize = 13
+    name.Font = Enum.Font.GothamBold
+    name.TextXAlignment = Enum.TextXAlignment.Left
+    name.Parent = btn
+    
+    local desc = Instance.new("TextLabel")
+    desc.Size = UDim2.new(1, -80, 0, 18)
+    desc.Position = UDim2.new(0, 10, 0, 30)
+    desc.BackgroundTransparency = 1
+    desc.Text = pack.desc
+    desc.TextColor3 = Color3.fromRGB(130, 130, 135)
+    desc.TextSize = 10
+    desc.Font = Enum.Font.Gotham
+    desc.TextXAlignment = Enum.TextXAlignment.Left
+    desc.Parent = btn
+    
+    local check = Instance.new("TextLabel")
+    check.Size = UDim2.new(0, 20, 0, 20)
+    check.Position = UDim2.new(0, 10, 0, 20)
+    check.BackgroundTransparency = 1
+    check.Text = "✓"
+    check.TextColor3 = Color3.fromRGB(0, 180, 100)
+    check.TextSize = 14
+    check.Font = Enum.Font.GothamBold
+    check.Visible = (pack.name == currentPackName)
+    check.Parent = btn
+    
+    local apply = Instance.new("TextButton")
+    apply.Size = UDim2.new(0, 60, 0, 28)
+    apply.Position = UDim2.new(1, -70, 0, 16)
+    apply.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+    apply.Text = "Apply"
+    apply.TextColor3 = Color3.fromRGB(255, 255, 255)
+    apply.TextSize = 11
+    apply.Font = Enum.Font.GothamBold
+    apply.BorderSizePixel = 0
+    apply.Parent = btn
+    
+    local applyCorner = Instance.new("UICorner")
+    applyCorner.CornerRadius = UDim.new(0, 5)
+    applyCorner.Parent = apply
+    
+    if pack.name == currentPackName then
+        activeCheckmark = check
+    end
+    
+    apply.MouseButton1Click:Connect(function()
+        if isApplying then
+            statusText.Text = "Please wait..."
+            return
+        end
+        
+        statusText.Text = "Applying " .. pack.name .. "..."
+        apply.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
+        apply.Text = "..."
+        
+        local success = applyPack(pack)
+        task.wait(0.2)
+        
+        if success then
+            statusText.Text = "Applied " .. pack.name .. "!"
+            currentText.Text = "Current: " .. pack.name
+            apply.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
+            apply.Text = "✓"
+            
+            if activeCheckmark then
+                activeCheckmark.Visible = false
+            end
+            check.Visible = true
+            activeCheckmark = check
+            
+            task.wait(0.6)
+            apply.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+            apply.Text = "Apply"
+        else
+            statusText.Text = "Failed! Wait for character"
+            apply.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+            apply.Text = "Retry"
+            task.wait(1)
+            apply.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+            apply.Text = "Apply"
+        end
+        
+        task.wait(0.3)
+        statusText.Text = "Ready"
+    end)
+end
+
+for i, pack in ipairs(packs) do
+    createPackButton(pack, i)
+end
+
+-- Minimize
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        main:TweenSize(UDim2.new(0, 300, 0, 35), "Out", "Quad", 0.2)
+        minBtn.Text = "+"
+        scroll.Visible = false
+        status.Visible = false
+    else
+        main:TweenSize(UDim2.new(0, 300, 0, 400), "Out", "Quad", 0.2)
+        minBtn.Text = "-"
+        task.wait(0.2)
+        scroll.Visible = true
+        status.Visible = true
+    end
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+-- Dragging
+local dragStart = nil
+local frameStart = nil
+local dragging = false
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        frameStart = main.Position
+    end
+end)
+
+userInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + delta.X, frameStart.Y.Scale, frameStart.Y.Offset + delta.Y)
+    end
+end)
+
+userInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+-- Apply saved pack on respawn
+local function onCharacterAdded()
+    task.wait(2)
+    loadSavedPack()
+    for _, pack in ipairs(packs) do
+        if pack.name == savedPack then
+            applyPack(pack)
+            break
+        end
+    end
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+
+-- Initial load
+task.wait(2)
+loadSavedPack()
+for _, pack in ipairs(packs) do
+    if pack.name == savedPack then
+        applyPack(pack)
+        break
+    end
+end
