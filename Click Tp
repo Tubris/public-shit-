@@ -1,0 +1,273 @@
+--BLUBBISON ME!!!!!
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local localPlayer = Players.LocalPlayer
+
+local enabled = false
+local minimized = false
+local screenGui = nil
+local mainFrame = nil
+local toggleButton = nil
+local minimizeButton = nil
+local closeButton = nil
+local keybindButton = nil
+local currentKeybind = nil
+local waitingForKeybind = false
+
+localPlayer.CameraMinZoomDistance = 0.5
+localPlayer.CameraMaxZoomDistance = 10000
+
+local function updateButtonColor()
+    if not toggleButton then return end
+    if enabled then
+        toggleButton.Text = "CLICK TP: ON"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    else
+        toggleButton.Text = "CLICK TP: OFF"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    end
+end
+
+local function getKeyName(key)
+    if not key then return "None"
+    elseif key == Enum.KeyCode.LeftControl then return "LCtrl"
+    elseif key == Enum.KeyCode.RightControl then return "RCtrl"
+    elseif key == Enum.KeyCode.LeftShift then return "LShift"
+    elseif key == Enum.KeyCode.RightShift then return "RShift"
+    elseif key == Enum.KeyCode.LeftAlt then return "LAlt"
+    elseif key == Enum.KeyCode.RightAlt then return "RAlt"
+    else return tostring(key.Name) end
+end
+
+local function setupGUI()
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "ClickTP"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.DisplayOrder = 999
+    screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+    
+    mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 160, 0, 115)
+    mainFrame.Position = UDim2.new(0, 10, 0, 100)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    mainFrame.BackgroundTransparency = 0.1
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+    mainFrame.ZIndex = 999
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = mainFrame
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(70, 70, 100)
+    stroke.Transparency = 0.5
+    stroke.Parent = mainFrame
+    
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0, 25)
+    titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    titleBar.BackgroundTransparency = 0.5
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = mainFrame
+    
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 10)
+    titleCorner.Parent = titleBar
+    
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -60, 1, 0)
+    titleLabel.Position = UDim2.new(0, 8, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Click TP"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 12
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = titleBar
+    
+    minimizeButton = Instance.new("TextButton")
+    minimizeButton.Size = UDim2.new(0, 22, 1, -4)
+    minimizeButton.Position = UDim2.new(1, -50, 0, 2)
+    minimizeButton.Text = "-"
+    minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minimizeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+    minimizeButton.Font = Enum.Font.GothamBold
+    minimizeButton.TextSize = 14
+    minimizeButton.Parent = titleBar
+    
+    local minCorner = Instance.new("UICorner")
+    minCorner.CornerRadius = UDim.new(0, 4)
+    minCorner.Parent = minimizeButton
+    
+    closeButton = Instance.new("TextButton")
+    closeButton.Size = UDim2.new(0, 22, 1, -4)
+    closeButton.Position = UDim2.new(1, -26, 0, 2)
+    closeButton.Text = "X"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 12
+    closeButton.Parent = titleBar
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 4)
+    closeCorner.Parent = closeButton
+    
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = "Content"
+    contentFrame.Size = UDim2.new(1, 0, 1, -25)
+    contentFrame.Position = UDim2.new(0, 0, 0, 25)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = mainFrame
+    
+    toggleButton = Instance.new("TextButton")
+    toggleButton.Size = UDim2.new(0, 120, 0, 28)
+    toggleButton.Position = UDim2.new(0.5, -60, 0, 5)
+    toggleButton.Text = "CLICK TP: OFF"
+    toggleButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.TextSize = 11
+    toggleButton.Parent = contentFrame
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = toggleButton
+    
+    keybindButton = Instance.new("TextButton")
+    keybindButton.Size = UDim2.new(0, 120, 0, 28)
+    keybindButton.Position = UDim2.new(0.5, -60, 0, 38)
+    keybindButton.Text = "Keybind: None"
+    keybindButton.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    keybindButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+    keybindButton.Font = Enum.Font.Gotham
+    keybindButton.TextSize = 10
+    keybindButton.Parent = contentFrame
+    
+    local keyCorner = Instance.new("UICorner")
+    keyCorner.CornerRadius = UDim.new(0, 6)
+    keyCorner.Parent = keybindButton
+    
+    local dragging = false
+    local dragStart
+    local frameStart
+    
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            frameStart = mainFrame.Position
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(0, frameStart.X.Offset + delta.X, 0, frameStart.Y.Offset + delta.Y)
+        end
+    end)
+    
+    minimizeButton.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        contentFrame.Visible = not minimized
+        minimizeButton.Text = minimized and "+" or "-"
+        mainFrame.Size = minimized and UDim2.new(0, 160, 0, 25) or UDim2.new(0, 160, 0, 115)
+    end)
+    
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+    
+    toggleButton.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        updateButtonColor()
+    end)
+    
+    keybindButton.MouseButton1Click:Connect(function()
+        waitingForKeybind = true
+        keybindButton.Text = "Press any key..."
+        keybindButton.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+    end)
+end
+
+local function teleportToMouse()
+    if not enabled then return end
+    
+    local mouse = localPlayer:GetMouse()
+    if not mouse then return end
+    
+    local targetPos = mouse.Hit.Position
+    local character = localPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        rootPart.CFrame = CFrame.new(targetPos)
+        if toggleButton then
+            local originalColor = toggleButton.BackgroundColor3
+            TweenService:create(toggleButton, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(0, 255, 0)}):play()
+            task.wait(0.1)
+            TweenService:create(toggleButton, TweenInfo.new(0.1), {BackgroundColor3 = originalColor}):play()
+        end
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if waitingForKeybind then
+        if input.KeyCode ~= Enum.KeyCode.Unknown then
+            currentKeybind = input.KeyCode
+            waitingForKeybind = false
+            if keybindButton then
+                keybindButton.Text = "Keybind: " .. getKeyName(currentKeybind)
+                keybindButton.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+            end
+        end
+        return
+    end
+    
+    if currentKeybind and input.KeyCode == currentKeybind then
+        enabled = not enabled
+        updateButtonColor()
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if not enabled then return end
+    
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if mainFrame and mainFrame.Parent then
+            local mousePos = input.Position
+            local absPos = mainFrame.AbsolutePosition
+            local absSize = mainFrame.AbsoluteSize
+            local isOverGui = mousePos.X >= absPos.X and mousePos.X <= absPos.X + absSize.X
+                and mousePos.Y >= absPos.Y and mousePos.Y <= absPos.Y + absSize.Y
+            if isOverGui then return end
+        end
+        teleportToMouse()
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        localPlayer.CameraMinZoomDistance = 0.5
+        localPlayer.CameraMaxZoomDistance = 10000
+    end
+end)
+
+setupGUI()
+updateButtonColor()
