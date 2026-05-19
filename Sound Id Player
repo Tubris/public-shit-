@@ -1,0 +1,439 @@
+--SOur Creammmmm is a Dreammm Faseen
+
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Create GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DirtyDanielsSoundPlayer"
+screenGui.Parent = playerGui
+
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 380, 0, 220)
+mainFrame.Position = UDim2.new(0.5, -190, 0.5, -110)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+mainFrame.BackgroundTransparency = 0.05
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+-- Shadows and corners
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 12)
+mainCorner.Parent = mainFrame
+
+local shadow = Instance.new("UIStroke")
+shadow.Thickness = 1
+shadow.Color = Color3.fromRGB(80, 80, 100)
+shadow.Transparency = 0.5
+shadow.Parent = mainFrame
+
+-- Title Bar (for dragging)
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+titleBar.BackgroundTransparency = 0.3
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 12)
+titleCorner.Parent = titleBar
+
+-- Title Text
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -90, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.Text = "Dirty Daniels Sound Player"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextYAlignment = Enum.TextYAlignment.Center
+title.Parent = titleBar
+
+-- Minimize Button
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 30, 0, 30)
+minimizeButton.Position = UDim2.new(1, -70, 0, 5)
+minimizeButton.Text = "−"
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(200, 180, 50)
+minimizeButton.BackgroundTransparency = 0.8
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.TextSize = 20
+minimizeButton.BorderSizePixel = 0
+minimizeButton.Parent = titleBar
+
+local minimizeCorner = Instance.new("UICorner")
+minimizeCorner.CornerRadius = UDim.new(0, 6)
+minimizeCorner.Parent = minimizeButton
+
+minimizeButton.MouseEnter:Connect(function()
+	minimizeButton.BackgroundTransparency = 0.3
+end)
+
+minimizeButton.MouseLeave:Connect(function()
+	minimizeButton.BackgroundTransparency = 0.8
+end)
+
+-- Close Button
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.Text = "✕"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.BackgroundTransparency = 0.8
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 16
+closeButton.BorderSizePixel = 0
+closeButton.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeButton
+
+closeButton.MouseEnter:Connect(function()
+	closeButton.BackgroundTransparency = 0.3
+end)
+
+closeButton.MouseLeave:Connect(function()
+	closeButton.BackgroundTransparency = 0.8
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+	screenGui:Destroy()
+end)
+
+-- Minimize functionality
+local minimized = false
+local originalSize = mainFrame.Size
+local originalContentVisible = true
+
+minimizeButton.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	
+	if minimized then
+		originalSize = mainFrame.Size
+		mainFrame.Size = UDim2.new(0, 380, 0, 40)
+		idSection.Visible = false
+		playButton.Visible = false
+		stopButton.Visible = false
+		volSection.Visible = false
+		minimizeButton.Text = "+"
+	else
+		mainFrame.Size = originalSize
+		idSection.Visible = true
+		playButton.Visible = true
+		stopButton.Visible = true
+		volSection.Visible = true
+		minimizeButton.Text = "−"
+	end
+end)
+
+-- ID Section Background
+local idSection = Instance.new("Frame")
+idSection.Size = UDim2.new(0, 360, 0, 45)
+idSection.Position = UDim2.new(0.5, -180, 0, 55)
+idSection.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+idSection.BackgroundTransparency = 0.5
+idSection.BorderSizePixel = 0
+idSection.Parent = mainFrame
+
+local idSectionCorner = Instance.new("UICorner")
+idSectionCorner.CornerRadius = UDim.new(0, 8)
+idSectionCorner.Parent = idSection
+
+-- ID Label
+local idLabel = Instance.new("TextLabel")
+idLabel.Size = UDim2.new(0, 70, 1, 0)
+idLabel.Position = UDim2.new(0, 10, 0, 0)
+idLabel.Text = "Sound ID:"
+idLabel.TextColor3 = Color3.fromRGB(180, 180, 220)
+idLabel.BackgroundTransparency = 1
+idLabel.Font = Enum.Font.GothamSemibold
+idLabel.TextSize = 13
+idLabel.TextXAlignment = Enum.TextXAlignment.Left
+idLabel.TextYAlignment = Enum.TextYAlignment.Center
+idLabel.Parent = idSection
+
+-- ID Input Box
+local idBox = Instance.new("TextBox")
+idBox.Size = UDim2.new(0, 170, 0, 32)
+idBox.Position = UDim2.new(0, 80, 0.5, -16)
+idBox.PlaceholderText = "Enter sound ID"
+idBox.Text = "142376088"
+idBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+idBox.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+idBox.Font = Enum.Font.Gotham
+idBox.TextSize = 13
+idBox.ClearTextOnFocus = false
+idBox.Parent = idSection
+
+local idCorner = Instance.new("UICorner")
+idCorner.CornerRadius = UDim.new(0, 6)
+idCorner.Parent = idBox
+
+-- Load Button
+local loadButton = Instance.new("TextButton")
+loadButton.Size = UDim2.new(0, 70, 0, 32)
+loadButton.Position = UDim2.new(1, -80, 0.5, -16)
+loadButton.Text = "Load"
+loadButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+loadButton.BackgroundColor3 = Color3.fromRGB(80, 140, 220)
+loadButton.Font = Enum.Font.GothamBold
+loadButton.TextSize = 13
+loadButton.BorderSizePixel = 0
+loadButton.Parent = idSection
+
+local loadCorner = Instance.new("UICorner")
+loadCorner.CornerRadius = UDim.new(0, 6)
+loadCorner.Parent = loadButton
+
+loadButton.MouseEnter:Connect(function()
+	loadButton.BackgroundColor3 = Color3.fromRGB(100, 160, 240)
+end)
+
+loadButton.MouseLeave:Connect(function()
+	loadButton.BackgroundColor3 = Color3.fromRGB(80, 140, 220)
+end)
+
+-- Play/Stop Buttons
+local playButton = Instance.new("TextButton")
+playButton.Size = UDim2.new(0, 120, 0, 42)
+playButton.Position = UDim2.new(0.5, -130, 0, 115)
+playButton.Text = "▶ Play"
+playButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+playButton.BackgroundColor3 = Color3.fromRGB(50, 180, 70)
+playButton.Font = Enum.Font.GothamBold
+playButton.TextSize = 16
+playButton.BorderSizePixel = 0
+playButton.Parent = mainFrame
+
+local playCorner = Instance.new("UICorner")
+playCorner.CornerRadius = UDim.new(0, 8)
+playCorner.Parent = playButton
+
+playButton.MouseEnter:Connect(function()
+	playButton.BackgroundColor3 = Color3.fromRGB(70, 200, 90)
+end)
+
+playButton.MouseLeave:Connect(function()
+	playButton.BackgroundColor3 = Color3.fromRGB(50, 180, 70)
+end)
+
+local stopButton = Instance.new("TextButton")
+stopButton.Size = UDim2.new(0, 120, 0, 42)
+stopButton.Position = UDim2.new(0.5, 10, 0, 115)
+stopButton.Text = "■ Stop"
+stopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+stopButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+stopButton.Font = Enum.Font.GothamBold
+stopButton.TextSize = 16
+stopButton.BorderSizePixel = 0
+stopButton.Parent = mainFrame
+
+local stopCorner = Instance.new("UICorner")
+stopCorner.CornerRadius = UDim.new(0, 8)
+stopCorner.Parent = stopButton
+
+stopButton.MouseEnter:Connect(function()
+	stopButton.BackgroundColor3 = Color3.fromRGB(220, 80, 80)
+end)
+
+stopButton.MouseLeave:Connect(function()
+	stopButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+end)
+
+-- Volume Section
+local volSection = Instance.new("Frame")
+volSection.Size = UDim2.new(0, 360, 0, 40)
+volSection.Position = UDim2.new(0.5, -180, 0, 170)
+volSection.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+volSection.BackgroundTransparency = 0.5
+volSection.BorderSizePixel = 0
+volSection.Parent = mainFrame
+
+local volSectionCorner = Instance.new("UICorner")
+volSectionCorner.CornerRadius = UDim.new(0, 8)
+volSectionCorner.Parent = volSection
+
+-- Volume Label
+local volLabel = Instance.new("TextLabel")
+volLabel.Size = UDim2.new(0, 60, 1, 0)
+volLabel.Position = UDim2.new(0, 10, 0, 0)
+volLabel.Text = "Volume:"
+volLabel.TextColor3 = Color3.fromRGB(180, 180, 220)
+volLabel.BackgroundTransparency = 1
+volLabel.Font = Enum.Font.GothamSemibold
+volLabel.TextSize = 13
+volLabel.TextXAlignment = Enum.TextXAlignment.Left
+volLabel.TextYAlignment = Enum.TextYAlignment.Center
+volLabel.Parent = volSection
+
+-- Volume Percent
+local volPercent = Instance.new("TextLabel")
+volPercent.Size = UDim2.new(0, 45, 1, 0)
+volPercent.Position = UDim2.new(1, -55, 0, 0)
+volPercent.Text = "50%"
+volPercent.TextColor3 = Color3.fromRGB(100, 200, 255)
+volPercent.BackgroundTransparency = 1
+volPercent.Font = Enum.Font.GothamBold
+volPercent.TextSize = 13
+volPercent.TextXAlignment = Enum.TextXAlignment.Right
+volPercent.TextYAlignment = Enum.TextYAlignment.Center
+volPercent.Parent = volSection
+
+-- Volume Slider
+local sliderBg = Instance.new("Frame")
+sliderBg.Size = UDim2.new(0, 210, 0, 5)
+sliderBg.Position = UDim2.new(0, 75, 0.5, -2.5)
+sliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
+sliderBg.BorderSizePixel = 0
+sliderBg.Parent = volSection
+
+local sliderBgCorner = Instance.new("UICorner")
+sliderBgCorner.CornerRadius = UDim.new(0, 2.5)
+sliderBgCorner.Parent = sliderBg
+
+-- Volume Slider Fill
+local sliderFill = Instance.new("Frame")
+sliderFill.Size = UDim2.new(0.5, 0, 1, 0)
+sliderFill.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
+sliderFill.BorderSizePixel = 0
+sliderFill.Parent = sliderBg
+
+local sliderFillCorner = Instance.new("UICorner")
+sliderFillCorner.CornerRadius = UDim.new(0, 2.5)
+sliderFillCorner.Parent = sliderFill
+
+-- Slider Knob
+local sliderKnob = Instance.new("TextButton")
+sliderKnob.Size = UDim2.new(0, 14, 0, 14)
+sliderKnob.Position = UDim2.new(0.5, -7, -0.5, -4.5)
+sliderKnob.Text = ""
+sliderKnob.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
+sliderKnob.BorderSizePixel = 0
+sliderKnob.AutoButtonColor = false
+sliderKnob.Parent = sliderBg
+
+local knobCorner = Instance.new("UICorner")
+knobCorner.CornerRadius = UDim.new(1, 0)
+knobCorner.Parent = sliderKnob
+
+-- Sound object
+local sound = Instance.new("Sound")
+sound.Volume = 0.5
+sound.Parent = playerGui
+
+-- Variables
+local dragging = false
+local draggingGUI = false
+local dragStart
+local frameStart
+local currentVolume = 50
+
+-- Update volume UI (100% = 5x louder, so max volume = 5)
+local function setVolume(percent)
+	currentVolume = math.clamp(percent, 0, 100)
+	-- Map 0-100% to 0-5 volume (5x louder at max)
+	local mappedVolume = (currentVolume / 100) * 5
+	sound.Volume = mappedVolume
+	volPercent.Text = tostring(math.floor(currentVolume)) .. "%"
+	sliderFill.Size = UDim2.new(currentVolume / 100, 0, 1, 0)
+	sliderKnob.Position = UDim2.new(currentVolume / 100, -7, -0.5, -4.5)
+end
+
+-- Slider input handler
+local function updateFromInput(input)
+	local relativeX = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+	setVolume(relativeX * 100)
+end
+
+-- Knob dragging
+sliderKnob.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		updateFromInput(input)
+	end
+end)
+
+-- Background clicking
+sliderBg.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		updateFromInput(input)
+	end
+end)
+
+-- Mouse movement
+local uis = game:GetService("UserInputService")
+uis.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		updateFromInput(input)
+	end
+end)
+
+uis.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+
+-- Load sound
+local function loadSound()
+	local id = idBox.Text:match("%d+")
+	if id then
+		sound:Stop()
+		sound.SoundId = "rbxassetid://" .. id
+		task.wait(0.1)
+		sound:Play()
+	end
+end
+
+loadButton.MouseButton1Click:Connect(loadSound)
+
+-- Play button
+playButton.MouseButton1Click:Connect(function()
+	sound:Play()
+end)
+
+-- Stop button
+stopButton.MouseButton1Click:Connect(function()
+	sound:Stop()
+end)
+
+-- Enter key in textbox
+idBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		loadSound()
+	end
+end)
+
+-- GUI Dragging
+titleBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		draggingGUI = true
+		dragStart = input.Position
+		frameStart = mainFrame.Position
+	end
+end)
+
+uis.InputChanged:Connect(function(input)
+	if draggingGUI and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Position - dragStart
+		mainFrame.Position = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + delta.X,
+										frameStart.Y.Scale, frameStart.Y.Offset + delta.Y)
+	end
+end)
+
+uis.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		draggingGUI = false
+	end
+end)
+
+-- Initial load
+loadSound()
