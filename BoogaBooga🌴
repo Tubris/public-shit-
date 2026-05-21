@@ -2212,8 +2212,33 @@ local function shouldIncludeDropped(instance)
 	return not filteredDroppedItems[cleanName]
 end
 
+local function getWanderingTrader()
+	local dialogNPCs = workspace:FindFirstChild("DialogNPCs")
+	local normal = dialogNPCs and dialogNPCs:FindFirstChild("Normal")
+	return normal and normal:FindFirstChild("Wandering Trader")
+end
+
+local function isInsideWanderingTrader(instance)
+	local trader = getWanderingTrader()
+	return trader ~= nil and (instance == trader or instance:IsDescendantOf(trader))
+end
+
+local function getWanderingTraderBody()
+	local trader = getWanderingTrader()
+	return trader and (
+		trader:FindFirstChild("HumanoidRootPart")
+		or trader:FindFirstChild("UpperTorso")
+		or trader:FindFirstChild("Torso")
+		or trader.PrimaryPart
+		or trader:FindFirstChildWhichIsA("BasePart", true)
+	)
+end
+
 local function shouldIncludeEntity(instance)
 	local lowerName = string.lower(instance.Name)
+	if isInsideWanderingTrader(instance) then
+		return false
+	end
 	if instance.Name == "Part" then
 		return false
 	end
@@ -2238,10 +2263,7 @@ local function isMeteorCore(instance)
 end
 
 local function isWanderingTrader(instance)
-	local dialogNPCs = workspace:FindFirstChild("DialogNPCs")
-	local normal = dialogNPCs and dialogNPCs:FindFirstChild("Normal")
-	local trader = normal and normal:FindFirstChild("Wandering Trader")
-	return trader ~= nil and instance == trader
+	return instance == getWanderingTraderBody()
 end
 
 local function isRainbowEvent(instance)
