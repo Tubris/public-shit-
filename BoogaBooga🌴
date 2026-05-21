@@ -1,16 +1,19 @@
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local Stats = game:GetService("Stats")
-local CollectionService = game:GetService("CollectionService")
-local PhysicsService = game:GetService("PhysicsService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
+local S = {
+	Players = game:GetService("Players"),
+	UserInputService = game:GetService("UserInputService"),
+	RunService = game:GetService("RunService"),
+	TweenService = game:GetService("TweenService"),
+	Stats = game:GetService("Stats"),
+	CollectionService = game:GetService("CollectionService"),
+	PhysicsService = game:GetService("PhysicsService"),
+	ReplicatedStorage = game:GetService("ReplicatedStorage"),
+	TeleportService = game:GetService("TeleportService"),
+	HttpService = game:GetService("HttpService"),
+	Lighting = game:GetService("Lighting"),
+	VirtualUser = game:GetService("VirtualUser"),
+}
 
-local player = Players.LocalPlayer
+local player = S.Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
@@ -51,6 +54,7 @@ local state = {
 	Minimized = false,
 	Stats = true,
 	Fullbright = false,
+	ServerRegion = "NA East",
 	ToggleKey = Enum.KeyCode.Return,
 	FreecamToggleKey = Enum.KeyCode.O,
 	AutoRunKey = Enum.KeyCode.Equals,
@@ -100,10 +104,12 @@ local state = {
 	PerformanceGuard = true,
 }
 
-local oreSelections = {}
-local entitySelections = {}
-local portalSelections = {}
-local droppedSelections = {}
+local selections = {
+	Ore = {},
+	Entity = {},
+	Portal = {},
+	Dropped = {},
+}
 
 local filteredDroppedItems = {
 	Berry = true,
@@ -174,29 +180,32 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
 local connections = {}
-local playerEsp = {}
-local worldEsp = {}
-local worldCandidates = {}
-local deathSoundConnection
-local dragStart
-local frameStart
-local dragging = false
-local dragTween
-local freecamKeys = {
-	Forward = false,
-	Back = false,
-	Left = false,
-	Right = false,
-	Up = false,
-	Down = false,
-	Boost = false,
+local esp = {
+	Players = {},
+	World = {},
+	Candidates = {},
 }
-local freecamYaw = 0
-local freecamPitch = 0
-local freecamCFrame
-local freecamOriginal = {}
-local fullbrightOriginalLighting
-local fullbrightOriginalInstances = {}
+local deathSoundConnection
+local drag = {
+	Active = false,
+}
+local freecam = {
+	Keys = {
+		Forward = false,
+		Back = false,
+		Left = false,
+		Right = false,
+		Up = false,
+		Down = false,
+		Boost = false,
+	},
+	Yaw = 0,
+	Pitch = 0,
+	Original = {},
+}
+local fullbright = {
+	Instances = {},
+}
 
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -205,14 +214,14 @@ local function connect(signal, fn)
 end
 
 local function playDeathSound()
-	local boolet = ReplicatedStorage:FindFirstChild("BOOLET")
+	local boolet = S.ReplicatedStorage:FindFirstChild("BOOLET")
 	local boom = boolet and boolet:FindFirstChild("boom")
 	if not boom or not boom:IsA("Sound") then
 		boom = Instance.new("Sound")
 		boom.Name = "boom"
 		boom.SoundId = "rbxassetid://5178876770"
 		boom.Volume = 1
-		boom.Parent = boolet or ReplicatedStorage
+		boom.Parent = boolet or S.ReplicatedStorage
 	elseif boom.SoundId == "" then
 		boom.SoundId = "rbxassetid://5178876770"
 	end
@@ -239,7 +248,7 @@ end
 watchLocalDeath(humanoid)
 
 local function tween(obj, info, props)
-	TweenService:Create(obj, info or TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+	S.TweenService:Create(obj, info or TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
 end
 
 local function make(className, props, parent)
@@ -322,7 +331,7 @@ end
 
 local function findPing()
 	local ok, result = pcall(function()
-		local performanceStats = Stats:FindFirstChild("PerformanceStats")
+		local performanceStats = S.Stats:FindFirstChild("PerformanceStats")
 		if not performanceStats then
 			return 0
 		end
@@ -847,12 +856,12 @@ local function createSlider(parent, label, min, max, getValue, setValue)
 			redraw()
 		end
 	end)
-	connect(UserInputService.InputEnded, function(input)
+	connect(S.UserInputService.InputEnded, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			sliding = false
 		end
 	end)
-	connect(UserInputService.InputChanged, function(input)
+	connect(S.UserInputService.InputChanged, function(input)
 		if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			setFromX(input.Position.X)
 			redraw()
@@ -942,7 +951,7 @@ local function notify(titleText, bodyText)
 end
 
 local function saveProperties(instance, properties)
-	if not instance or fullbrightOriginalInstances[instance] then
+	if not instance or fullbright.Instances[instance] then
 		return
 	end
 
@@ -952,7 +961,7 @@ local function saveProperties(instance, properties)
 			snapshot[property] = instance[property]
 		end)
 	end
-	fullbrightOriginalInstances[instance] = snapshot
+	fullbright.Instances[instance] = snapshot
 end
 
 local function applyFullbrightToInstance(instance)
@@ -976,8 +985,8 @@ local function applyFullbrightToInstance(instance)
 end
 
 local function applyFullbright()
-	if not fullbrightOriginalLighting then
-		fullbrightOriginalLighting = {}
+	if not fullbright.Lighting then
+		fullbright.Lighting = {}
 		for _, property in ipairs({
 			"Ambient",
 			"OutdoorAmbient",
@@ -993,40 +1002,40 @@ local function applyFullbright()
 			"ShadowSoftness",
 		}) do
 			pcall(function()
-				fullbrightOriginalLighting[property] = Lighting[property]
+				fullbright.Lighting[property] = S.Lighting[property]
 			end)
 		end
 	end
 
-	Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-	Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-	Lighting.Brightness = 3
-	Lighting.ClockTime = 14
-	Lighting.FogStart = 0
-	Lighting.FogEnd = 1000000
-	Lighting.FogColor = Color3.fromRGB(255, 255, 255)
-	Lighting.GlobalShadows = false
-	pcall(function() Lighting.ExposureCompensation = 0.25 end)
-	pcall(function() Lighting.EnvironmentDiffuseScale = 1 end)
-	pcall(function() Lighting.EnvironmentSpecularScale = 0 end)
-	pcall(function() Lighting.ShadowSoftness = 0 end)
+	S.Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+	S.Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+	S.Lighting.Brightness = 3
+	S.Lighting.ClockTime = 14
+	S.Lighting.FogStart = 0
+	S.Lighting.FogEnd = 1000000
+	S.Lighting.FogColor = Color3.fromRGB(255, 255, 255)
+	S.Lighting.GlobalShadows = false
+	pcall(function() S.Lighting.ExposureCompensation = 0.25 end)
+	pcall(function() S.Lighting.EnvironmentDiffuseScale = 1 end)
+	pcall(function() S.Lighting.EnvironmentSpecularScale = 0 end)
+	pcall(function() S.Lighting.ShadowSoftness = 0 end)
 
-	for _, descendant in ipairs(Lighting:GetDescendants()) do
+	for _, descendant in ipairs(S.Lighting:GetDescendants()) do
 		applyFullbrightToInstance(descendant)
 	end
 end
 
 local function restoreFullbright()
-	if fullbrightOriginalLighting then
-		for property, value in pairs(fullbrightOriginalLighting) do
+	if fullbright.Lighting then
+		for property, value in pairs(fullbright.Lighting) do
 			pcall(function()
-				Lighting[property] = value
+				S.Lighting[property] = value
 			end)
 		end
-		fullbrightOriginalLighting = nil
+		fullbright.Lighting = nil
 	end
 
-	for instance, snapshot in pairs(fullbrightOriginalInstances) do
+	for instance, snapshot in pairs(fullbright.Instances) do
 		if instance and instance.Parent then
 			for property, value in pairs(snapshot) do
 				pcall(function()
@@ -1035,7 +1044,7 @@ local function restoreFullbright()
 			end
 		end
 	end
-	table.clear(fullbrightOriginalInstances)
+	table.clear(fullbright.Instances)
 end
 
 local function setFullbright(enabled)
@@ -1099,7 +1108,7 @@ end
 
 local function teleportToVoidWorld()
 	local ok, err = pcall(function()
-		TeleportService:Teleport(PLACE.VoidWorld, player)
+		S.TeleportService:Teleport(PLACE.VoidWorld, player)
 	end)
 	if not ok then
 		warn("Void World teleport failed:", err)
@@ -1109,7 +1118,7 @@ end
 
 local function teleportToOverworld()
 	local ok, err = pcall(function()
-		TeleportService:Teleport(PLACE.Overworld, player)
+		S.TeleportService:Teleport(PLACE.Overworld, player)
 	end)
 	if not ok then
 		warn("Overworld teleport failed:", err)
@@ -1138,7 +1147,7 @@ end
 
 local function rejoinCurrentServer()
 	local ok, err = pcall(function()
-		TeleportService:Teleport(game.PlaceId, player)
+		S.TeleportService:Teleport(game.PlaceId, player)
 	end)
 	if not ok then
 		warn("Rejoin failed:", err)
@@ -1150,7 +1159,7 @@ local function getServerList(placeId, cursor)
 	local url = string.format(
 		"https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
 		placeId,
-		cursor and ("&cursor=" .. HttpService:UrlEncode(cursor)) or ""
+		cursor and ("&cursor=" .. S.HttpService:UrlEncode(cursor)) or ""
 	)
 
 	local body
@@ -1159,14 +1168,49 @@ local function getServerList(placeId, cursor)
 		local response = requestFn({ Url = url, Method = "GET" })
 		body = response and response.Body
 	else
-		body = HttpService:GetAsync(url)
+		body = S.HttpService:GetAsync(url)
 	end
 
-	return HttpService:JSONDecode(body)
+	return S.HttpService:JSONDecode(body)
+end
+
+local function serverMatchesRegion(server)
+	if state.ServerRegion == "Any" then
+		return true
+	end
+
+	local searchText = string.lower(table.concat({
+		tostring(server.region or ""),
+		tostring(server.location or ""),
+		tostring(server.regionName or ""),
+		tostring(server.geoLocation or ""),
+		tostring(server.serverRegion or ""),
+		tostring(server.countryCode or ""),
+	}, " "))
+
+	if searchText == "     " then
+		return true
+	end
+
+	local wanted = {
+		["NA East"] = { "na-east", "useast", "us-east", "east", "virginia", "ashburn", "atlanta", "miami", "new york", "us", "usa" },
+		["NA West"] = { "na-west", "uswest", "us-west", "west", "california", "oregon", "los angeles", "san jose", "seattle", "us", "usa" },
+		["EU"] = { "eu", "europe", "germany", "frankfurt", "netherlands", "amsterdam", "uk", "london", "france", "paris" },
+		["Asia"] = { "asia", "singapore", "tokyo", "japan", "hong kong", "korea", "seoul" },
+		["Oceania"] = { "oceania", "australia", "sydney" },
+	}
+
+	for _, token in ipairs(wanted[state.ServerRegion] or {}) do
+		if string.find(searchText, token, 1, true) then
+			return true
+		end
+	end
+	return false
 end
 
 local function chooseServer(wantsFullest)
 	local bestServer
+	local fallbackServer
 	local cursor
 	local placeId = PLACE.ServerList
 
@@ -1181,12 +1225,21 @@ local function chooseServer(wantsFullest)
 			local playing = tonumber(server.playing) or 0
 			local maxPlayers = tonumber(server.maxPlayers) or 0
 			if server.id and server.id ~= game.JobId and playing < maxPlayers then
-				if not bestServer then
-					bestServer = server
-				elseif wantsFullest and playing > (tonumber(bestServer.playing) or 0) then
-					bestServer = server
-				elseif not wantsFullest and playing < (tonumber(bestServer.playing) or math.huge) then
-					bestServer = server
+				if not fallbackServer then
+					fallbackServer = server
+				elseif wantsFullest and playing > (tonumber(fallbackServer.playing) or 0) then
+					fallbackServer = server
+				elseif not wantsFullest and playing < (tonumber(fallbackServer.playing) or math.huge) then
+					fallbackServer = server
+				end
+				if serverMatchesRegion(server) then
+					if not bestServer then
+						bestServer = server
+					elseif wantsFullest and playing > (tonumber(bestServer.playing) or 0) then
+						bestServer = server
+					elseif not wantsFullest and playing < (tonumber(bestServer.playing) or math.huge) then
+						bestServer = server
+					end
 				end
 			end
 		end
@@ -1197,7 +1250,7 @@ local function chooseServer(wantsFullest)
 		end
 	end
 
-	return bestServer
+	return bestServer or fallbackServer
 end
 
 local function joinServerBySize(wantsFullest)
@@ -1209,7 +1262,7 @@ local function joinServerBySize(wantsFullest)
 	end
 
 	local ok, err = pcall(function()
-		TeleportService:TeleportToPlaceInstance(placeId, server.id, player)
+		S.TeleportService:TeleportToPlaceInstance(placeId, server.id, player)
 	end)
 	if not ok then
 		warn("Server hop failed:", err)
@@ -1422,6 +1475,109 @@ local function createFilterDropdown(parent, label, getNames, selections, default
 	return refreshOptions
 end
 
+local function createChoiceDropdown(parent, label, choices, getValue, setValue)
+	local box = make("Frame", {
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+	}, parent)
+
+	local headerButton = make("TextButton", {
+		Size = UDim2.new(1, 0, 0, 30),
+		BackgroundColor3 = Color3.fromRGB(20, 20, 23),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Font = Enum.Font.GothamBold,
+		TextColor3 = Color3.fromRGB(245, 245, 245),
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, box)
+	corner(headerButton, 7)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+	}, headerButton)
+
+	local overlay = make("Frame", {
+		Size = UDim2.new(0, 250, 0, (#choices * 30) + 12),
+		BackgroundColor3 = Color3.fromRGB(8, 8, 10),
+		BorderSizePixel = 0,
+		Visible = false,
+		ZIndex = 80,
+	}, screenGui)
+	corner(overlay, 8)
+	stroke(overlay, Color3.fromRGB(255, 255, 255), 0.7, 1)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 6),
+		PaddingRight = UDim.new(0, 6),
+		PaddingTop = UDim.new(0, 6),
+		PaddingBottom = UDim.new(0, 6),
+	}, overlay)
+	make("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, overlay)
+
+	local expanded = false
+	local rows = {}
+
+	local function redraw()
+		headerButton.Text = label .. ": " .. tostring(getValue()) .. (expanded and " -" or " +")
+		for choice, row in pairs(rows) do
+			local selected = choice == getValue()
+			row.BackgroundColor3 = selected and Color3.fromRGB(245, 245, 245) or Color3.fromRGB(20, 20, 23)
+			row.TextColor3 = selected and Color3.fromRGB(5, 5, 6) or Color3.fromRGB(235, 235, 240)
+		end
+	end
+
+	local function closeDropdown()
+		expanded = false
+		overlay.Visible = false
+		redraw()
+	end
+	table.insert(dropdownClosers, closeDropdown)
+
+	for index, choice in ipairs(choices) do
+		local row = make("TextButton", {
+			Name = choice,
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundColor3 = Color3.fromRGB(20, 20, 23),
+			BorderSizePixel = 0,
+			AutoButtonColor = false,
+			Font = Enum.Font.Gotham,
+			Text = choice,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 82,
+			LayoutOrder = index,
+		}, overlay)
+		corner(row, 6)
+		make("UIPadding", {
+			PaddingLeft = UDim.new(0, 8),
+			PaddingRight = UDim.new(0, 8),
+		}, row)
+		rows[choice] = row
+		connect(row.MouseButton1Click, function()
+			setValue(choice)
+			closeDropdown()
+		end)
+	end
+
+	connect(headerButton.MouseButton1Click, function()
+		local shouldOpen = not expanded
+		closeDropdowns()
+		expanded = shouldOpen
+		overlay.Visible = expanded
+		if expanded then
+			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
+			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, (#choices * 30) + 12)
+		end
+		redraw()
+	end)
+
+	redraw()
+	return redraw
+end
+
 --// Feature logic
 local flyVelocity
 local flyGyro
@@ -1431,17 +1587,17 @@ local noclipTerrainGroup
 local noclipGroupName = "ChubbisonMeNoclip"
 
 pcall(function()
-	PhysicsService:RegisterCollisionGroup(noclipGroupName)
+	S.PhysicsService:RegisterCollisionGroup(noclipGroupName)
 end)
 pcall(function()
-	PhysicsService:CollisionGroupSetCollidable(noclipGroupName, noclipGroupName, false)
+	S.PhysicsService:CollisionGroupSetCollidable(noclipGroupName, noclipGroupName, false)
 end)
 pcall(function()
-	PhysicsService:CollisionGroupSetCollidable(noclipGroupName, "Default", false)
+	S.PhysicsService:CollisionGroupSetCollidable(noclipGroupName, "Default", false)
 end)
 pcall(function()
-	for _, groupInfo in ipairs(PhysicsService:GetRegisteredCollisionGroups()) do
-		PhysicsService:CollisionGroupSetCollidable(noclipGroupName, groupInfo.name, false)
+	for _, groupInfo in ipairs(S.PhysicsService:GetRegisteredCollisionGroups()) do
+		S.PhysicsService:CollisionGroupSetCollidable(noclipGroupName, groupInfo.name, false)
 	end
 end)
 
@@ -1536,50 +1692,50 @@ local function setFreecam(enabled)
 		if not camera then
 			return
 		end
-		freecamOriginal.CameraType = camera.CameraType
-		freecamOriginal.CameraSubject = camera.CameraSubject
-		freecamOriginal.MouseBehavior = UserInputService.MouseBehavior
-		freecamOriginal.MouseIconEnabled = UserInputService.MouseIconEnabled
+		freecam.Original.CameraType = camera.CameraType
+		freecam.Original.CameraSubject = camera.CameraSubject
+		freecam.Original.MouseBehavior = S.UserInputService.MouseBehavior
+		freecam.Original.MouseIconEnabled = S.UserInputService.MouseIconEnabled
 		if hum then
-			freecamOriginal.WalkSpeed = hum.WalkSpeed
-			freecamOriginal.JumpPower = hum.JumpPower
-			freecamOriginal.JumpHeight = hum.JumpHeight
-			freecamOriginal.AutoRotate = hum.AutoRotate
+			freecam.Original.WalkSpeed = hum.WalkSpeed
+			freecam.Original.JumpPower = hum.JumpPower
+			freecam.Original.JumpHeight = hum.JumpHeight
+			freecam.Original.AutoRotate = hum.AutoRotate
 			hum.WalkSpeed = 0
 			hum.JumpPower = 0
 			hum.JumpHeight = 0
 			hum.AutoRotate = false
 		end
 		if root then
-			freecamOriginal.RootAnchored = root.Anchored
+			freecam.Original.RootAnchored = root.Anchored
 			root.Anchored = true
 			root.AssemblyLinearVelocity = Vector3.zero
 		end
-		freecamCFrame = camera.CFrame
-		local look = freecamCFrame.LookVector
-		freecamYaw = math.atan2(-look.X, -look.Z)
-		freecamPitch = math.asin(math.clamp(look.Y, -1, 1))
+		freecam.CFrame = camera.CFrame
+		local look = freecam.CFrame.LookVector
+		freecam.Yaw = math.atan2(-look.X, -look.Z)
+		freecam.Pitch = math.asin(math.clamp(look.Y, -1, 1))
 		camera.CameraType = Enum.CameraType.Scriptable
-		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		UserInputService.MouseIconEnabled = false
+		S.UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		S.UserInputService.MouseIconEnabled = false
 		notify("Freecam On", "Scroll to change speed. Shift boosts 5x. Press " .. keyName(state.FreecamToggleKey) .. " to exit.")
 	else
 		if camera then
-			camera.CameraType = freecamOriginal.CameraType or Enum.CameraType.Custom
-			camera.CameraSubject = freecamOriginal.CameraSubject or hum
+			camera.CameraType = freecam.Original.CameraType or Enum.CameraType.Custom
+			camera.CameraSubject = freecam.Original.CameraSubject or hum
 		end
 		if hum then
-			hum.WalkSpeed = freecamOriginal.WalkSpeed or defaults.WalkSpeed
-			hum.JumpPower = freecamOriginal.JumpPower or defaults.JumpPower
-			hum.JumpHeight = freecamOriginal.JumpHeight or defaults.JumpHeight
-			hum.AutoRotate = freecamOriginal.AutoRotate ~= false
+			hum.WalkSpeed = freecam.Original.WalkSpeed or defaults.WalkSpeed
+			hum.JumpPower = freecam.Original.JumpPower or defaults.JumpPower
+			hum.JumpHeight = freecam.Original.JumpHeight or defaults.JumpHeight
+			hum.AutoRotate = freecam.Original.AutoRotate ~= false
 		end
 		if root then
-			root.Anchored = freecamOriginal.RootAnchored == true
+			root.Anchored = freecam.Original.RootAnchored == true
 		end
-		UserInputService.MouseBehavior = freecamOriginal.MouseBehavior or Enum.MouseBehavior.Default
-		UserInputService.MouseIconEnabled = freecamOriginal.MouseIconEnabled ~= false
-		table.clear(freecamOriginal)
+		S.UserInputService.MouseBehavior = freecam.Original.MouseBehavior or Enum.MouseBehavior.Default
+		S.UserInputService.MouseIconEnabled = freecam.Original.MouseIconEnabled ~= false
+		table.clear(freecam.Original)
 	end
 end
 
@@ -1591,25 +1747,25 @@ local function updateFreecam(dt)
 	if not camera then
 		return
 	end
-	if not freecamCFrame then
-		freecamCFrame = camera.CFrame
+	if not freecam.CFrame then
+		freecam.CFrame = camera.CFrame
 	end
 
-	local rotation = CFrame.fromOrientation(freecamPitch, freecamYaw, 0)
+	local rotation = CFrame.fromOrientation(freecam.Pitch, freecam.Yaw, 0)
 	local move = Vector3.zero
-	if freecamKeys.Forward then move += rotation.LookVector end
-	if freecamKeys.Back then move -= rotation.LookVector end
-	if freecamKeys.Right then move += rotation.RightVector end
-	if freecamKeys.Left then move -= rotation.RightVector end
-	if freecamKeys.Up then move += Vector3.yAxis end
-	if freecamKeys.Down then move -= Vector3.yAxis end
+	if freecam.Keys.Forward then move += rotation.LookVector end
+	if freecam.Keys.Back then move -= rotation.LookVector end
+	if freecam.Keys.Right then move += rotation.RightVector end
+	if freecam.Keys.Left then move -= rotation.RightVector end
+	if freecam.Keys.Up then move += Vector3.yAxis end
+	if freecam.Keys.Down then move -= Vector3.yAxis end
 
-	local speed = state.FreecamSpeed * (freecamKeys.Boost and 5 or 1)
+	local speed = state.FreecamSpeed * (freecam.Keys.Boost and 5 or 1)
 	if move.Magnitude > 0 then
-		freecamCFrame = freecamCFrame + move.Unit * speed * dt
+		freecam.CFrame = freecam.CFrame + move.Unit * speed * dt
 	end
-	freecamCFrame = CFrame.new(freecamCFrame.Position) * rotation
-	camera.CFrame = freecamCFrame
+	freecam.CFrame = CFrame.new(freecam.CFrame.Position) * rotation
+	camera.CFrame = freecam.CFrame
 
 	local _, hum, root = getCharacterParts()
 	if hum then
@@ -1760,6 +1916,38 @@ end
 local autoAttackClock = 0
 local virtualUser = game:GetService("VirtualUser")
 
+local function fireMouseHit()
+	local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
+	local x = math.floor(viewport.X / 2)
+	local y = math.floor(viewport.Y / 2)
+	local sent = false
+
+	local okVirtualInput = pcall(function()
+		local vim = game:GetService("VirtualInputManager")
+		vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end)
+	sent = okVirtualInput
+
+	if not sent and typeof(mouse1click) == "function" then
+		sent = pcall(mouse1click)
+	end
+	if not sent and typeof(mouse1press) == "function" and typeof(mouse1release) == "function" then
+		sent = pcall(function()
+			mouse1press()
+			mouse1release()
+		end)
+	end
+	if not sent then
+		pcall(function()
+			local point = Vector2.new(x, y)
+			local clickCFrame = camera and camera.CFrame or CFrame.new()
+			virtualUser:Button1Down(point, clickCFrame)
+			virtualUser:Button1Up(point, clickCFrame)
+		end)
+	end
+end
+
 local function fireToolAttackSignals(tool)
 	local fired = false
 	local attackNames = {
@@ -1839,14 +2027,7 @@ local function updateAutoAttack()
 		end)
 	end
 
-	pcall(function()
-		local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
-		local point = Vector2.new(viewport.X / 2, viewport.Y / 2)
-		local clickCFrame = camera and camera.CFrame or CFrame.new()
-		virtualUser:Button1Down(point, clickCFrame)
-		task.wait()
-		virtualUser:Button1Up(point, clickCFrame)
-	end)
+	fireMouseHit()
 end
 
 --// ESP
@@ -1946,7 +2127,7 @@ local function ensurePlayerEsp(targetPlayer)
 		return
 	end
 
-	local obj = playerEsp[targetPlayer]
+	local obj = esp.Players[targetPlayer]
 	local baseColor = targetPlayer.TeamColor and targetPlayer.TeamColor.Color or Color3.fromRGB(120, 180, 255)
 	local teamColor = state.PlayerZayMode and Color3.fromHSV((os.clock() * 0.18) % 1, 0.9, 1) or baseColor
 	if not obj then
@@ -1964,7 +2145,7 @@ local function ensurePlayerEsp(targetPlayer)
 			Tracer = tracer,
 			Character = targetCharacter,
 		}
-		playerEsp[targetPlayer] = obj
+		esp.Players[targetPlayer] = obj
 	end
 
 	obj.Billboard.Adornee = adornee
@@ -2000,7 +2181,7 @@ end
 
 local function hasAnyTag(instance, tags)
 	for _, tag in ipairs(tags) do
-		if CollectionService:HasTag(instance, tag) then
+		if S.CollectionService:HasTag(instance, tag) then
 			return true
 		end
 	end
@@ -2036,8 +2217,8 @@ end
 
 local function shouldIncludeDropped(instance)
 	local cleanName = instance.Name:gsub("%s*%b()$", "")
-	if droppedSelections[cleanName] ~= nil then
-		return droppedSelections[cleanName]
+	if selections.Dropped[cleanName] ~= nil then
+		return selections.Dropped[cleanName]
 	end
 	return not filteredDroppedItems[cleanName]
 end
@@ -2245,17 +2426,17 @@ end
 
 local function trackWorldCandidate(instance)
 	if canBeWorldCandidate(instance) then
-		worldCandidates[instance] = true
+		esp.Candidates[instance] = true
 	end
 end
 
 local function untrackWorldCandidate(instance)
-	worldCandidates[instance] = nil
-	if worldEsp[instance] then
-		if worldEsp[instance].Billboard then worldEsp[instance].Billboard:Destroy() end
-		if worldEsp[instance].Highlight then worldEsp[instance].Highlight:Destroy() end
-		if worldEsp[instance].Tracer then worldEsp[instance].Tracer:Destroy() end
-		worldEsp[instance] = nil
+	esp.Candidates[instance] = nil
+	if esp.World[instance] then
+		if esp.World[instance].Billboard then esp.World[instance].Billboard:Destroy() end
+		if esp.World[instance].Highlight then esp.World[instance].Highlight:Destroy() end
+		if esp.World[instance].Tracer then esp.World[instance].Tracer:Destroy() end
+		esp.World[instance] = nil
 	end
 end
 
@@ -2267,7 +2448,7 @@ local function matchesWorldRule(instance, ruleName)
 
 	if ruleName == "Ore" then
 		local name = selectionName(instance)
-		return endsWith(instance.Name, "Node") and oreSelections[name] ~= false
+		return endsWith(instance.Name, "Node") and selections.Ore[name] ~= false
 	end
 
 	if ruleName == "Entity" and not shouldIncludeEntity(instance) then
@@ -2276,7 +2457,7 @@ local function matchesWorldRule(instance, ruleName)
 
 	if ruleName == "Entity" then
 		local name = selectionName(instance)
-		if entitySelections[name] ~= true then
+		if selections.Entity[name] ~= true then
 			return false
 		end
 	end
@@ -2290,7 +2471,7 @@ local function matchesWorldRule(instance, ruleName)
 	end
 
 	if ruleName == "Portal" then
-		return isPortalInstance(instance) and portalSelections[selectionName(instance)] ~= false
+		return isPortalInstance(instance) and selections.Portal[selectionName(instance)] ~= false
 	end
 
 	if ruleName == "AntHill" then
@@ -2317,11 +2498,11 @@ end
 local function getWorldCandidates()
 	local candidates = {}
 
-	for instance in pairs(worldCandidates) do
+	for instance in pairs(esp.Candidates) do
 		if instance.Parent and canBeWorldCandidate(instance) then
 			table.insert(candidates, instance)
 		else
-			worldCandidates[instance] = nil
+			esp.Candidates[instance] = nil
 		end
 	end
 
@@ -2342,7 +2523,7 @@ local function ensureWorldEsp(instance, ruleName)
 		or ruleName == "God" and getGodColor(instance)
 		or ruleName == "Event" and getEventColor(instance)
 		or rule.color
-	local obj = worldEsp[instance]
+	local obj = esp.World[instance]
 	if not obj then
 		local billboard, text = createBillboard(instance.Name, color, state.WorldTextSize)
 		local highlight = createHighlight(color)
@@ -2358,7 +2539,7 @@ local function ensureWorldEsp(instance, ruleName)
 			Highlight = highlight,
 			Tracer = tracer,
 		}
-		worldEsp[instance] = obj
+		esp.World[instance] = obj
 	end
 
 	obj.Billboard.Adornee = adornee
@@ -2407,7 +2588,7 @@ function updateWorldEsp()
 	end
 
 	if not anyEnabled then
-		clearEsp(worldEsp)
+		clearEsp(esp.World)
 		return
 	end
 
@@ -2444,12 +2625,12 @@ function updateWorldEsp()
 		end
 	end
 
-	for instance, obj in pairs(worldEsp) do
+	for instance, obj in pairs(esp.World) do
 		if not active[instance] or not obj.Instance.Parent then
 			if obj.Billboard then obj.Billboard:Destroy() end
 			if obj.Highlight then obj.Highlight:Destroy() end
 			if obj.Tracer then obj.Tracer:Destroy() end
-			worldEsp[instance] = nil
+			esp.World[instance] = nil
 		end
 	end
 	if state.PerformanceGuard then
@@ -2506,7 +2687,7 @@ local function updateStats()
 	avgPing = math.floor(avgPing / #pingHistory + 0.5)
 
 	fpsLabel.Text = "FPS " .. avgFps
-	playersLabel.Text = string.format("PLR %d/%d", #Players:GetPlayers(), Players.MaxPlayers)
+	playersLabel.Text = string.format("PLR %d/%d", #S.Players:GetPlayers(), S.Players.MaxPlayers)
 	pingLabel.Text = "PING " .. avgPing
 
 	fpsLabel.TextColor3 = avgFps >= 55 and Color3.fromRGB(128, 255, 168)
@@ -2528,7 +2709,7 @@ end
 
 local function collectOreNames()
 	local names = {}
-	for instance in pairs(worldCandidates) do
+	for instance in pairs(esp.Candidates) do
 		if instance.Parent and endsWith(instance.Name, "Node") then
 			names[selectionName(instance)] = true
 		end
@@ -2553,7 +2734,7 @@ local function collectEntityNames()
 			names[selectionName(instance)] = true
 		end
 	end
-	for instance in pairs(worldCandidates) do
+	for instance in pairs(esp.Candidates) do
 		if instance.Parent then
 			maybeAdd(instance)
 		end
@@ -2587,7 +2768,7 @@ local function collectDroppedNames()
 			names[selectionName(instance)] = true
 		end
 	end
-	for instance in pairs(worldCandidates) do
+	for instance in pairs(esp.Candidates) do
 		if instance.Parent then
 			maybeAdd(instance)
 		end
@@ -2599,112 +2780,117 @@ local function collectDroppedNames()
 end
 
 --// UI content
-local movementSection = section(playerPage, "Movement")
-createToggle(movementSection, "Walk Speed", function() return state.WalkSpeedEnabled end, function(v)
+local sections = {}
+sections.Movement = section(playerPage, "Movement")
+createToggle(sections.Movement, "Walk Speed", function() return state.WalkSpeedEnabled end, function(v)
 	state.WalkSpeedEnabled = v
 	applyCharacterSettings()
 end)
-createSlider(movementSection, "Walk Speed", 0, 18, function() return state.WalkSpeed end, function(v)
+createSlider(sections.Movement, "Walk Speed", 0, 18, function() return state.WalkSpeed end, function(v)
 	state.WalkSpeed = v
 	applyCharacterSettings()
 end)
-createToggle(movementSection, "Jump Power", function() return state.JumpEnabled end, function(v)
+createToggle(sections.Movement, "Jump Power", function() return state.JumpEnabled end, function(v)
 	state.JumpEnabled = v
 	applyCharacterSettings()
 end)
-createSlider(movementSection, "Jump Power", 0, 75, function() return state.JumpPower end, function(v)
+createSlider(sections.Movement, "Jump Power", 0, 75, function() return state.JumpPower end, function(v)
 	state.JumpPower = v
 	applyCharacterSettings()
 end)
-createToggle(movementSection, "No Slip", function() return state.NoSlip end, function(v)
+createToggle(sections.Movement, "No Slip", function() return state.NoSlip end, function(v)
 	state.NoSlip = v
 	applyCharacterSettings()
 end)
-createToggle(movementSection, "Noclip", function() return state.Noclip end, function(v)
+createToggle(sections.Movement, "Noclip", function() return state.Noclip end, function(v)
 	state.Noclip = v
 	if not v then
 		restoreNoclip()
 	end
 end)
-createToggle(movementSection, "Infinite Camera Zoom", function() return state.InfCamera end, function(v)
+createToggle(sections.Movement, "Infinite Camera Zoom", function() return state.InfCamera end, function(v)
 	state.InfCamera = v
 	applyCharacterSettings()
 end)
 
-local flySection = section(playerPage, "Fly")
-createToggle(flySection, "Fly Enabled", function() return state.Fly end, setFly)
-createSlider(flySection, "Fly Speed", 0, 18, function() return state.FlySpeed end, function(v)
+sections.Fly = section(playerPage, "Fly")
+createToggle(sections.Fly, "Fly Enabled", function() return state.Fly end, setFly)
+createSlider(sections.Fly, "Fly Speed", 0, 18, function() return state.FlySpeed end, function(v)
 	state.FlySpeed = v
 end)
 
-local playerEspSection = section(visualPage, "Player ESP")
-createToggle(playerEspSection, "Enabled", function() return state.PlayerEsp end, function(v)
+sections.PlayerEsp = section(visualPage, "Player ESP")
+createToggle(sections.PlayerEsp, "Enabled", function() return state.PlayerEsp end, function(v)
 	state.PlayerEsp = v
-	if not v then clearEsp(playerEsp) end
+	if not v then clearEsp(esp.Players) end
 end)
-createToggle(playerEspSection, "Names", function() return state.PlayerNames end, function(v) state.PlayerNames = v end)
-createToggle(playerEspSection, "Chams", function() return state.PlayerChams end, function(v) state.PlayerChams = v end)
-createToggle(playerEspSection, "Distance", function() return state.PlayerDistance end, function(v) state.PlayerDistance = v end)
-createToggle(playerEspSection, "Tracers", function() return state.PlayerTracers end, function(v) state.PlayerTracers = v end)
-createToggle(playerEspSection, "Zay Mode", function() return state.PlayerZayMode end, function(v) state.PlayerZayMode = v end)
-createToggle(playerEspSection, "Dropped Items", function() return state.DroppedEsp end, function(v) state.DroppedEsp = v; updateWorldEsp() end)
-createSlider(playerEspSection, "Text Size", 10, 28, function() return state.PlayerTextSize end, function(v) state.PlayerTextSize = v end)
-createSlider(playerEspSection, "FOV", 40, 120, function() return state.PlayerFov end, function(v)
+createToggle(sections.PlayerEsp, "Names", function() return state.PlayerNames end, function(v) state.PlayerNames = v end)
+createToggle(sections.PlayerEsp, "Chams", function() return state.PlayerChams end, function(v) state.PlayerChams = v end)
+createToggle(sections.PlayerEsp, "Distance", function() return state.PlayerDistance end, function(v) state.PlayerDistance = v end)
+createToggle(sections.PlayerEsp, "Tracers", function() return state.PlayerTracers end, function(v) state.PlayerTracers = v end)
+createToggle(sections.PlayerEsp, "Zay Mode", function() return state.PlayerZayMode end, function(v) state.PlayerZayMode = v end)
+createToggle(sections.PlayerEsp, "Dropped Items", function() return state.DroppedEsp end, function(v) state.DroppedEsp = v; updateWorldEsp() end)
+createToggle(sections.PlayerEsp, "Fullbright", function() return state.Fullbright end, setFullbright)
+createSlider(sections.PlayerEsp, "Text Size", 10, 28, function() return state.PlayerTextSize end, function(v) state.PlayerTextSize = v end)
+createSlider(sections.PlayerEsp, "FOV", 40, 120, function() return state.PlayerFov end, function(v)
 	state.PlayerFov = v
 	if camera then
 		camera.FieldOfView = v
 	end
 end)
 
-local worldKindsSection = section(worldPage, "World ESP")
-createToggle(worldKindsSection, "Ores", function() return state.OreEsp end, function(v) state.OreEsp = v; updateWorldEsp() end)
-createToggle(worldKindsSection, "Entities", function() return state.EntityEsp end, function(v) state.EntityEsp = v; updateWorldEsp() end)
-createToggle(worldKindsSection, "Events", function() return state.EventEsp end, function(v) state.EventEsp = v; updateWorldEsp() end)
-createToggle(worldKindsSection, "God ESP", function() return state.GodEsp end, function(v) state.GodEsp = v; updateWorldEsp() end)
-createToggle(worldKindsSection, "Portal ESP", function() return state.PortalEsp end, function(v) state.PortalEsp = v; updateWorldEsp() end)
-createToggle(worldKindsSection, "Ant Hill ESP", function() return state.AntHillEsp end, function(v) state.AntHillEsp = v; updateWorldEsp() end)
-createToggle(worldKindsSection, "Totem ESP", function() return state.TotemEsp end, function(v) state.TotemEsp = v; updateWorldEsp() end)
+sections.WorldKinds = section(worldPage, "World ESP")
+createToggle(sections.WorldKinds, "Ores", function() return state.OreEsp end, function(v) state.OreEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "Entities", function() return state.EntityEsp end, function(v) state.EntityEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "Events", function() return state.EventEsp end, function(v) state.EventEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "God ESP", function() return state.GodEsp end, function(v) state.GodEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "Portal ESP", function() return state.PortalEsp end, function(v) state.PortalEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "Ant Hill ESP", function() return state.AntHillEsp end, function(v) state.AntHillEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "Totem ESP", function() return state.TotemEsp end, function(v) state.TotemEsp = v; updateWorldEsp() end)
 
-local filtersSection = section(worldPage, "ESP Filters")
-createFilterDropdown(filtersSection, "Ore Types", collectOreNames, oreSelections, true)
-createFilterDropdown(filtersSection, "Entity Types", collectEntityNames, entitySelections, false, true)
-createFilterDropdown(filtersSection, "Portal Types", collectPortalNames, portalSelections, true)
-createFilterDropdown(filtersSection, "Dropped Types", collectDroppedNames, droppedSelections, function(name)
+sections.Filters = section(worldPage, "ESP Filters")
+createFilterDropdown(sections.Filters, "Ore Types", collectOreNames, selections.Ore, true)
+createFilterDropdown(sections.Filters, "Entity Types", collectEntityNames, selections.Entity, false, true)
+createFilterDropdown(sections.Filters, "Portal Types", collectPortalNames, selections.Portal, true)
+createFilterDropdown(sections.Filters, "Dropped Types", collectDroppedNames, selections.Dropped, function(name)
 	return not filteredDroppedItems[name]
 end, true)
 
-local worldOptionsSection = section(worldPage, "World ESP Options")
-createToggle(worldOptionsSection, "Names", function() return state.WorldNames end, function(v) state.WorldNames = v end)
-createToggle(worldOptionsSection, "Chams", function() return state.WorldChams end, function(v) state.WorldChams = v end)
-createToggle(worldOptionsSection, "Distance", function() return state.WorldDistance end, function(v) state.WorldDistance = v end)
-createToggle(worldOptionsSection, "Tracers", function() return state.WorldTracers end, function(v) state.WorldTracers = v end)
-createSlider(worldOptionsSection, "Text Size", 10, 28, function() return state.WorldTextSize end, function(v) state.WorldTextSize = v end)
+sections.WorldOptions = section(worldPage, "World ESP Options")
+createToggle(sections.WorldOptions, "Names", function() return state.WorldNames end, function(v) state.WorldNames = v end)
+createToggle(sections.WorldOptions, "Chams", function() return state.WorldChams end, function(v) state.WorldChams = v end)
+createToggle(sections.WorldOptions, "Distance", function() return state.WorldDistance end, function(v) state.WorldDistance = v end)
+createToggle(sections.WorldOptions, "Tracers", function() return state.WorldTracers end, function(v) state.WorldTracers = v end)
+createSlider(sections.WorldOptions, "Text Size", 10, 28, function() return state.WorldTextSize end, function(v) state.WorldTextSize = v end)
 
-local settingsSection = section(settingsPage, "Interface")
-createToggle(settingsSection, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
-createToggle(settingsSection, "Fullbright", function() return state.Fullbright end, setFullbright)
-createKeybind(settingsSection, "GUI Toggle Key", "ToggleKey")
-createKeybind(settingsSection, "Freecam Toggle Key", "FreecamToggleKey")
-createKeybind(settingsSection, "AutoRun Key", "AutoRunKey")
-createKeybind(settingsSection, "AutoAttack Key", "AutoAttackKey")
-freecamToggleRedraw = createToggle(settingsSection, "Freecam", function() return state.Freecam end, setFreecam)
-autoAttackToggleRedraw = createToggle(settingsSection, "AutoAttack", function() return state.AutoAttack end, function(v) state.AutoAttack = v end)
-createToggle(settingsSection, "Performance Guard", function() return state.PerformanceGuard end, function(v) state.PerformanceGuard = v end)
-createActionButton(settingsSection, "Reset GUI", resetGuiLayout)
+sections.Settings = section(settingsPage, "Interface")
+createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
+createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
+createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
+createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
+createKeybind(sections.Settings, "AutoAttack Key", "AutoAttackKey")
+freecamToggleRedraw = createToggle(sections.Settings, "Freecam", function() return state.Freecam end, setFreecam)
+autoAttackToggleRedraw = createToggle(sections.Settings, "AutoAttack", function() return state.AutoAttack end, function(v) state.AutoAttack = v end)
+createActionButton(sections.Settings, "Reset GUI", resetGuiLayout)
 
-local teleportSection = section(settingsPage, "Teleports")
-createActionButton(teleportSection, "Teleport To Void World", teleportToVoidWorld)
-createActionButton(teleportSection, "Overworld TP", teleportToOverworld)
-createActionButton(teleportSection, "Rejoin Server", rejoinCurrentServer)
-createActionButton(teleportSection, "Join Smallest Server", function()
+sections.Teleport = section(settingsPage, "Teleports")
+createChoiceDropdown(sections.Teleport, "Server Region", { "NA East", "NA West", "EU", "Asia", "Oceania", "Any" }, function()
+	return state.ServerRegion
+end, function(value)
+	state.ServerRegion = value
+end)
+createActionButton(sections.Teleport, "Teleport To Void World", teleportToVoidWorld)
+createActionButton(sections.Teleport, "Overworld TP", teleportToOverworld)
+createActionButton(sections.Teleport, "Rejoin Server", rejoinCurrentServer)
+createActionButton(sections.Teleport, "Join Smallest Server", function()
 	joinServerBySize(false)
 end)
-createActionButton(teleportSection, "Join Fullest Server", function()
+createActionButton(sections.Teleport, "Join Fullest Server", function()
 	joinServerBySize(true)
 end)
 
-local dangerSection = section(settingsPage, "Danger")
-createActionButton(dangerSection, "Suicide", suicideLocalPlayer)
+sections.Danger = section(settingsPage, "Danger")
+createActionButton(sections.Danger, "Suicide", suicideLocalPlayer)
 
 activateTab("Player")
 
@@ -2718,36 +2904,36 @@ end)
 --// Window controls
 connect(header.InputBegan, function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		frameStart = main.Position
+		drag.Active = true
+		drag.Start = input.Position
+		drag.FrameStart = main.Position
 	end
 end)
 
-connect(UserInputService.InputChanged, function(input)
+connect(S.UserInputService.InputChanged, function(input)
 	if state.Freecam then
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			freecamYaw -= input.Delta.X * 0.0025
-			freecamPitch = math.clamp(freecamPitch - input.Delta.Y * 0.0025, math.rad(-85), math.rad(85))
+			freecam.Yaw -= input.Delta.X * 0.0025
+			freecam.Pitch = math.clamp(freecam.Pitch - input.Delta.Y * 0.0025, math.rad(-85), math.rad(85))
 		elseif input.UserInputType == Enum.UserInputType.MouseWheel then
-			local shiftHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+			local shiftHeld = S.UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or S.UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 			local step = shiftHeld and 60 or 20
 			state.FreecamSpeed = math.clamp(state.FreecamSpeed + input.Position.Z * step, 8, 2500)
 		end
 	end
 
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		local targetPosition = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + delta.X, frameStart.Y.Scale, frameStart.Y.Offset + delta.Y)
-		local targetShadowPosition = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + delta.X - 10, frameStart.Y.Scale, frameStart.Y.Offset + delta.Y - 12)
-		local targetAuraPosition = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + delta.X - 20, frameStart.Y.Scale, frameStart.Y.Offset + delta.Y - 22)
-		if dragTween then
-			dragTween:Cancel()
+	if drag.Active and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - drag.Start
+		local targetPosition = UDim2.new(drag.FrameStart.X.Scale, drag.FrameStart.X.Offset + delta.X, drag.FrameStart.Y.Scale, drag.FrameStart.Y.Offset + delta.Y)
+		local targetShadowPosition = UDim2.new(drag.FrameStart.X.Scale, drag.FrameStart.X.Offset + delta.X - 10, drag.FrameStart.Y.Scale, drag.FrameStart.Y.Offset + delta.Y - 12)
+		local targetAuraPosition = UDim2.new(drag.FrameStart.X.Scale, drag.FrameStart.X.Offset + delta.X - 20, drag.FrameStart.Y.Scale, drag.FrameStart.Y.Offset + delta.Y - 22)
+		if drag.Tween then
+			drag.Tween:Cancel()
 		end
-		dragTween = TweenService:Create(main, TweenInfo.new(0.055, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		drag.Tween = S.TweenService:Create(main, TweenInfo.new(0.055, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Position = targetPosition,
 		})
-		dragTween:Play()
+		drag.Tween:Play()
 		tween(mainShadow, TweenInfo.new(0.055, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Position = targetShadowPosition,
 		})
@@ -2757,9 +2943,9 @@ connect(UserInputService.InputChanged, function(input)
 	end
 end)
 
-connect(UserInputService.InputEnded, function(input)
+connect(S.UserInputService.InputEnded, function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
+		drag.Active = false
 	end
 end)
 
@@ -2783,7 +2969,7 @@ connect(close.MouseButton1Click, function()
 	screenGui:Destroy()
 end)
 
-connect(UserInputService.InputBegan, function(input, gameProcessed)
+connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	if awaitingKeybindFor and input.KeyCode ~= Enum.KeyCode.Unknown then
 		state[awaitingKeybindFor] = input.KeyCode
 		local changedKey = awaitingKeybindFor
@@ -2833,48 +3019,48 @@ connect(UserInputService.InputBegan, function(input, gameProcessed)
 
 	if input.KeyCode == Enum.KeyCode.W then
 		if not state.Freecam then movementKeys.Forward = true end
-		freecamKeys.Forward = true
+		freecam.Keys.Forward = true
 	elseif input.KeyCode == Enum.KeyCode.S then
 		if not state.Freecam then movementKeys.Back = true end
-		freecamKeys.Back = true
+		freecam.Keys.Back = true
 	elseif input.KeyCode == Enum.KeyCode.A then
 		if not state.Freecam then movementKeys.Left = true end
-		freecamKeys.Left = true
+		freecam.Keys.Left = true
 	elseif input.KeyCode == Enum.KeyCode.D then
 		if not state.Freecam then movementKeys.Right = true end
-		freecamKeys.Right = true
+		freecam.Keys.Right = true
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		if not state.Freecam then movementKeys.Up = true end
-		freecamKeys.Up = true
+		freecam.Keys.Up = true
 	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C then
 		if not state.Freecam then movementKeys.Down = true end
-		freecamKeys.Down = true
+		freecam.Keys.Down = true
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-		freecamKeys.Boost = true
+		freecam.Keys.Boost = true
 	end
 end)
 
-connect(UserInputService.InputEnded, function(input)
+connect(S.UserInputService.InputEnded, function(input)
 	if input.KeyCode == Enum.KeyCode.W then
 		movementKeys.Forward = false
-		freecamKeys.Forward = false
+		freecam.Keys.Forward = false
 	elseif input.KeyCode == Enum.KeyCode.S then
 		movementKeys.Back = false
-		freecamKeys.Back = false
+		freecam.Keys.Back = false
 	elseif input.KeyCode == Enum.KeyCode.A then
 		movementKeys.Left = false
-		freecamKeys.Left = false
+		freecam.Keys.Left = false
 	elseif input.KeyCode == Enum.KeyCode.D then
 		movementKeys.Right = false
-		freecamKeys.Right = false
+		freecam.Keys.Right = false
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		movementKeys.Up = false
-		freecamKeys.Up = false
+		freecam.Keys.Up = false
 	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C then
 		movementKeys.Down = false
-		freecamKeys.Down = false
+		freecam.Keys.Down = false
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-		freecamKeys.Boost = false
+		freecam.Keys.Boost = false
 	end
 end)
 
@@ -2900,10 +3086,10 @@ connect(player.CharacterAdded, function(newCharacter)
 	end
 end)
 
-connect(Players.PlayerRemoving, function(leaving)
-	if playerEsp[leaving] then
-		clearEsp({ [leaving] = playerEsp[leaving] })
-		playerEsp[leaving] = nil
+connect(S.Players.PlayerRemoving, function(leaving)
+	if esp.Players[leaving] then
+		clearEsp({ [leaving] = esp.Players[leaving] })
+		esp.Players[leaving] = nil
 	end
 end)
 
@@ -2915,7 +3101,7 @@ connect(workspace.DescendantRemoving, function(descendant)
 	untrackWorldCandidate(descendant)
 end)
 
-connect(Lighting.DescendantAdded, function(descendant)
+connect(S.Lighting.DescendantAdded, function(descendant)
 	if state.Fullbright then
 		task.defer(function()
 			if descendant and descendant.Parent then
@@ -2925,7 +3111,7 @@ connect(Lighting.DescendantAdded, function(descendant)
 	end
 end)
 
-connect(RunService.RenderStepped, function(dt)
+connect(S.RunService.RenderStepped, function(dt)
 	camera = workspace.CurrentCamera
 	applyCharacterSettings()
 	updateFreecam(dt)
@@ -2936,11 +3122,11 @@ connect(RunService.RenderStepped, function(dt)
 	updateStats()
 
 	if state.PlayerEsp then
-		for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
 			ensurePlayerEsp(targetPlayer)
 		end
 	else
-		clearEsp(playerEsp)
+		clearEsp(esp.Players)
 	end
 
 	worldScanTimer += dt
@@ -2961,7 +3147,7 @@ connect(RunService.RenderStepped, function(dt)
 	if worldLabelTimer >= labelDelay then
 		worldLabelTimer = 0
 
-		for _, obj in pairs(worldEsp) do
+		for _, obj in pairs(esp.World) do
 			if obj.Instance and obj.Instance.Parent then
 				local adornee = getAdornee(obj.Instance)
 				if adornee then
@@ -3020,6 +3206,6 @@ screenGui.Destroying:Connect(function()
 	for _, c in ipairs(connections) do
 		c:Disconnect()
 	end
-	clearEsp(playerEsp)
-	clearEsp(worldEsp)
+	clearEsp(esp.Players)
+	clearEsp(esp.World)
 end)
