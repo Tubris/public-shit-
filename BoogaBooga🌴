@@ -107,23 +107,30 @@ local selections = {
 		Adurite = true,
 		Gold = true,
 		Coal = true,
+		Obsidian = true,
+		["Void Ore"] = true,
 	},
 	Entity = {},
 	Portal = {},
 	Dropped = {},
 }
 
-local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal" }
+local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore" }
 local oreFallbackColors = {
 	Iron = Color3.fromRGB(185, 135, 85),
 	Stone = Color3.fromRGB(125, 125, 125),
 	Adurite = Color3.fromRGB(210, 45, 55),
 	Gold = Color3.fromRGB(245, 190, 70),
 	Coal = Color3.fromRGB(35, 35, 35),
+	Obsidian = Color3.fromRGB(36, 24, 52),
+	["Void Ore"] = Color3.fromRGB(145, 80, 255),
 }
 local oreAliases = {
 	["Adurite Rich Rock"] = "Adurite",
 	["Adurite Rock"] = "Adurite",
+	["Obsidian Deposit"] = "Obsidian",
+	["Obsidian Boulder"] = "Obsidian",
+	["Void Crag"] = "Void Ore",
 }
 
 local filteredDroppedItems = {
@@ -191,8 +198,16 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ChubbisonMe"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 2147483647
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.Parent = playerGui
+pcall(function()
+	screenGui.OnTopOfCoreBlur = true
+end)
+if not pcall(function()
+	screenGui.Parent = game:GetService("CoreGui")
+end) then
+	screenGui.Parent = playerGui
+end
 
 local connections = {}
 local esp = {
