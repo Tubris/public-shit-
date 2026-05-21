@@ -1844,7 +1844,7 @@ local function restoreNoclip()
 	noclipTerrainGroup = nil
 end
 
-local function updateNoclip(dt)
+local function updateNoclip()
 	if not state.Noclip then
 		return
 	end
@@ -1875,29 +1875,10 @@ local function updateNoclip(dt)
 		end
 		workspace.Terrain.CollisionGroup = noclipGroupName
 	end)
-
-	if state.Fly then
-		return
-	end
-
-	local move = Vector3.zero
-	local cf = camera and camera.CFrame or root.CFrame
-	if movementKeys.Forward or state.AutoRun then move += cf.LookVector end
-	if movementKeys.Back then move -= cf.LookVector end
-	if movementKeys.Right then move += cf.RightVector end
-	if movementKeys.Left then move -= cf.RightVector end
-	if movementKeys.Up then move += Vector3.yAxis end
-	if movementKeys.Down then move -= Vector3.yAxis end
-
-	if move.Magnitude > 0 then
-		local speed = state.WalkSpeedEnabled and state.WalkSpeed or (hum and hum.WalkSpeed or defaults.WalkSpeed)
-		root.CFrame = root.CFrame + (move.Unit * math.max(speed, 18) * dt)
-		root.AssemblyLinearVelocity = Vector3.zero
-	end
 end
 
 local function updateAutoRun()
-	if not state.AutoRun or state.Freecam or state.Fly or state.Noclip then
+	if not state.AutoRun or state.Freecam or state.Fly then
 		return
 	end
 
@@ -2248,6 +2229,13 @@ local function isMeteorCore(instance)
 	return instance:IsA("Model") and instance.Name == "Meteor Core"
 end
 
+local function isWanderingTrader(instance)
+	local dialogNPCs = workspace:FindFirstChild("DialogNPCs")
+	local normal = dialogNPCs and dialogNPCs:FindFirstChild("Normal")
+	local trader = normal and normal:FindFirstChild("Wandering Trader")
+	return trader ~= nil and (instance == trader or instance:IsDescendantOf(trader))
+end
+
 local function isRainbowEvent(instance)
 	return isTreasureChest(instance)
 end
@@ -2268,6 +2256,8 @@ end
 local function getEventColor(instance)
 	if isMeteorCore(instance) then
 		return getMeteorColor(instance)
+	elseif isWanderingTrader(instance) then
+		return Color3.fromRGB(150, 230, 255)
 	end
 	return worldRules.Event.color
 end
@@ -2275,6 +2265,10 @@ end
 local function getEventLabel(instance)
 	if isTreasureChest(instance) then
 		return "Treasure Chest"
+	elseif isMeteorCore(instance) then
+		return "Meteor Core"
+	elseif isWanderingTrader(instance) then
+		return "Wandering Trader"
 	end
 	return instance.Name
 end
@@ -2409,6 +2403,7 @@ local function canBeWorldCandidate(instance)
 		)
 		or isTreasureChest(instance)
 		or isMeteorCore(instance)
+		or isWanderingTrader(instance)
 		or isGodInstance(instance)
 		or isPortalInstance(instance)
 		or isAntHillInstance(instance)
@@ -2463,7 +2458,7 @@ local function matchesWorldRule(instance, ruleName)
 	end
 
 	if ruleName == "Event" then
-		return isTreasureChest(instance) or isMeteorCore(instance)
+		return isTreasureChest(instance) or isMeteorCore(instance) or isWanderingTrader(instance)
 	end
 
 	if ruleName == "God" then
@@ -3116,7 +3111,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	applyCharacterSettings()
 	updateFreecam(dt)
 	updateFly()
-	updateNoclip(dt)
+	updateNoclip()
 	updateAutoRun()
 	updateAutoAttack()
 	updateStats()
