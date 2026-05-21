@@ -2821,7 +2821,7 @@ createToggle(sections.Movement, "Walk Speed", function() return state.WalkSpeedE
 	enforceMovementOverrides()
 	task.delay(0.1, enforceMovementOverrides)
 end)
-createSlider(sections.Movement, "Walk Speed", 0, 18, function() return state.WalkSpeed end, function(v)
+createSlider(sections.Movement, "Walk Speed", 0, 20, function() return state.WalkSpeed end, function(v)
 	state.WalkSpeed = v
 	applyCharacterSettings()
 	enforceMovementOverrides()
@@ -2854,7 +2854,7 @@ end)
 
 sections.Fly = section(playerPage, "Fly")
 createToggle(sections.Fly, "Fly Enabled", function() return state.Fly end, setFly)
-createSlider(sections.Fly, "Fly Speed", 0, 18, function() return state.FlySpeed end, function(v)
+createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed end, function(v)
 	state.FlySpeed = v
 end)
 
