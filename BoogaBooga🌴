@@ -1147,7 +1147,7 @@ end
 
 local function rejoinCurrentServer()
 	local ok, err = pcall(function()
-		S.TeleportService:Teleport(game.PlaceId, player)
+		S.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
 	end)
 	if not ok then
 		warn("Rejoin failed:", err)
