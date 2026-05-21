@@ -2275,7 +2275,21 @@ local function getGodRoot()
 	return resources and resources:FindFirstChild("Ancient God")
 end
 
+local function isGodBag(instance)
+	local current = instance
+	while current and current ~= workspace do
+		if string.lower(current.Name) == "god bag" then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
 local function isGodInstance(instance)
+	if isGodBag(instance) then
+		return false
+	end
 	local hasGodName = string.find(string.lower(instance.Name), "god", 1, true) ~= nil
 	return hasGodName and getAdornee(instance) ~= nil
 end
