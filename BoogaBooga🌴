@@ -10,7 +10,6 @@ local S = {
 	TeleportService = game:GetService("TeleportService"),
 	HttpService = game:GetService("HttpService"),
 	Lighting = game:GetService("Lighting"),
-	VirtualUser = game:GetService("VirtualUser"),
 }
 
 local player = S.Players.LocalPlayer
@@ -58,7 +57,6 @@ local state = {
 	ToggleKey = Enum.KeyCode.Return,
 	FreecamToggleKey = Enum.KeyCode.O,
 	AutoRunKey = Enum.KeyCode.Equals,
-	AutoAttackKey = Enum.KeyCode.P,
 	Freecam = false,
 	FreecamSpeed = 64,
 
@@ -68,8 +66,6 @@ local state = {
 	JumpPower = 75,
 	NoSlip = true,
 	AutoRun = false,
-	AutoAttack = false,
-	AutoAttackInterval = 0.1,
 	Noclip = false,
 	InfCamera = true,
 	Fly = false,
@@ -105,10 +101,25 @@ local state = {
 }
 
 local selections = {
-	Ore = {},
+	Ore = {
+		Iron = true,
+		Stone = true,
+		Adurite = true,
+		Gold = true,
+		Coal = true,
+	},
 	Entity = {},
 	Portal = {},
 	Dropped = {},
+}
+
+local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal" }
+local oreFallbackColors = {
+	Iron = Color3.fromRGB(185, 135, 85),
+	Stone = Color3.fromRGB(125, 125, 125),
+	Adurite = Color3.fromRGB(210, 45, 55),
+	Gold = Color3.fromRGB(245, 190, 70),
+	Coal = Color3.fromRGB(35, 35, 35),
 }
 
 local filteredDroppedItems = {
@@ -203,6 +214,7 @@ local freecam = {
 	Pitch = 0,
 	Original = {},
 }
+local freecamReturnTracer
 local fullbright = {
 	Instances = {},
 }
@@ -608,11 +620,31 @@ make("UIPadding", {
 local pages = {}
 local tabButtons = {}
 local dropdownClosers = {}
+local openDropdowns = 0
+local closeDropdowns
 
-local function closeDropdowns()
+local dropdownBlocker = make("TextButton", {
+	Name = "DropdownBlocker",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(10, 6, 24),
+	BackgroundTransparency = 0.72,
+	BorderSizePixel = 0,
+	AutoButtonColor = false,
+	Text = "",
+	Visible = false,
+	ZIndex = 75,
+}, screenGui)
+
+connect(dropdownBlocker.MouseButton1Click, function()
+	closeDropdowns()
+end)
+
+function closeDropdowns()
 	for _, closeDropdown in ipairs(dropdownClosers) do
 		closeDropdown()
 	end
+	openDropdowns = 0
+	dropdownBlocker.Visible = false
 end
 
 local content = make("Frame", {
@@ -875,10 +907,12 @@ end
 local awaitingKeybindFor
 local keybindButtons = {}
 local freecamToggleRedraw
-local autoAttackToggleRedraw
 local updateWorldEsp
 local selectionName
 local readNumberValue
+local createTracer
+local drawTracer
+local rainbowColor
 
 local function keyName(keyCode)
 	return keyCode.Name:gsub("Left", "L"):gsub("Right", "R")
@@ -889,6 +923,10 @@ local function updateKeybindText(stateKey)
 	if button then
 		button.Text = awaitingKeybindFor == stateKey and "Press a key..." or keyName(state[stateKey])
 	end
+end
+
+local function isTypingInTextBox()
+	return S.UserInputService:GetFocusedTextBox() ~= nil
 end
 
 local function createKeybind(parent, label, stateKey)
@@ -1439,6 +1477,10 @@ local function createFilterDropdown(parent, label, getNames, selections, default
 	end
 
 	local function closeDropdown()
+		if expanded then
+			openDropdowns = math.max(0, openDropdowns - 1)
+			dropdownBlocker.Visible = openDropdowns > 0
+		end
 		expanded = false
 		overlay.Visible = false
 		headerButton.Text = label .. " +"
@@ -1458,6 +1500,8 @@ local function createFilterDropdown(parent, label, getNames, selections, default
 		overlay.Visible = expanded
 		headerButton.Text = label .. (expanded and " -" or " +")
 		if expanded then
+			openDropdowns += 1
+			dropdownBlocker.Visible = true
 			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
 			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, withSearch and 250 or 220)
 			refreshOptions()
@@ -1530,6 +1574,10 @@ local function createChoiceDropdown(parent, label, choices, getValue, setValue)
 	end
 
 	local function closeDropdown()
+		if expanded then
+			openDropdowns = math.max(0, openDropdowns - 1)
+			dropdownBlocker.Visible = openDropdowns > 0
+		end
 		expanded = false
 		overlay.Visible = false
 		redraw()
@@ -1568,6 +1616,8 @@ local function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		expanded = shouldOpen
 		overlay.Visible = expanded
 		if expanded then
+			openDropdowns += 1
+			dropdownBlocker.Visible = true
 			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
 			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, (#choices * 30) + 12)
 		end
@@ -1670,16 +1720,60 @@ local function applyCharacterSettings()
 			root.Anchored = false
 		end
 	end
-	hum.WalkSpeed = state.WalkSpeedEnabled and state.WalkSpeed or defaults.WalkSpeed
-	if hum.UseJumpPower then
-		hum.JumpPower = state.JumpEnabled and state.JumpPower or defaults.JumpPower
-	else
-		hum.JumpHeight = state.JumpEnabled and (state.JumpPower / 7) or defaults.JumpHeight
+	local targetWalkSpeed = state.WalkSpeedEnabled and state.WalkSpeed or defaults.WalkSpeed
+	if hum.WalkSpeed ~= targetWalkSpeed then
+		hum.WalkSpeed = targetWalkSpeed
 	end
-	hum.MaxSlopeAngle = state.NoSlip and 89.9 or defaults.MaxSlopeAngle
-	player.CameraMaxZoomDistance = state.InfCamera and 100000 or defaults.CameraMaxZoom
+	if hum.UseJumpPower then
+		local targetJumpPower = state.JumpEnabled and state.JumpPower or defaults.JumpPower
+		if hum.JumpPower ~= targetJumpPower then
+			hum.JumpPower = targetJumpPower
+		end
+	else
+		local targetJumpHeight = state.JumpEnabled and (state.JumpPower / 7) or defaults.JumpHeight
+		if hum.JumpHeight ~= targetJumpHeight then
+			hum.JumpHeight = targetJumpHeight
+		end
+	end
+	local targetSlope = state.NoSlip and 89.9 or defaults.MaxSlopeAngle
+	if hum.MaxSlopeAngle ~= targetSlope then
+		hum.MaxSlopeAngle = targetSlope
+	end
+	local targetZoom = state.InfCamera and 100000 or defaults.CameraMaxZoom
+	if player.CameraMaxZoomDistance ~= targetZoom then
+		player.CameraMaxZoomDistance = targetZoom
+	end
 	if camera then
-		camera.FieldOfView = state.PlayerFov
+		if camera.FieldOfView ~= state.PlayerFov then
+			camera.FieldOfView = state.PlayerFov
+		end
+	end
+end
+
+local function enforceMovementOverrides()
+	if state.Freecam then
+		return
+	end
+	local _, hum = getCharacterParts()
+	if not hum then
+		return
+	end
+
+	if state.WalkSpeedEnabled and hum.WalkSpeed ~= state.WalkSpeed then
+		hum.WalkSpeed = state.WalkSpeed
+	end
+
+	if state.JumpEnabled then
+		if hum.UseJumpPower then
+			if hum.JumpPower ~= state.JumpPower then
+				hum.JumpPower = state.JumpPower
+			end
+		else
+			local targetJumpHeight = state.JumpPower / 7
+			if hum.JumpHeight ~= targetJumpHeight then
+				hum.JumpHeight = targetJumpHeight
+			end
+		end
 	end
 end
 
@@ -1718,7 +1812,10 @@ local function setFreecam(enabled)
 		camera.CameraType = Enum.CameraType.Scriptable
 		S.UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 		S.UserInputService.MouseIconEnabled = false
-		notify("Freecam On", "Scroll to change speed. Shift boosts 5x. Press " .. keyName(state.FreecamToggleKey) .. " to exit.")
+		if not freecamReturnTracer then
+			freecamReturnTracer = createTracer(Color3.fromRGB(255, 255, 255))
+		end
+		notify("Freecam On", "Speed " .. math.floor(state.FreecamSpeed) .. " | Exit " .. keyName(state.FreecamToggleKey) .. " | RGB line = you")
 	else
 		if camera then
 			camera.CameraType = freecam.Original.CameraType or Enum.CameraType.Custom
@@ -1735,6 +1832,9 @@ local function setFreecam(enabled)
 		end
 		S.UserInputService.MouseBehavior = freecam.Original.MouseBehavior or Enum.MouseBehavior.Default
 		S.UserInputService.MouseIconEnabled = freecam.Original.MouseIconEnabled ~= false
+		if freecamReturnTracer then
+			freecamReturnTracer.Visible = false
+		end
 		table.clear(freecam.Original)
 	end
 end
@@ -1777,6 +1877,11 @@ local function updateFreecam(dt)
 	if root then
 		root.Anchored = true
 		root.AssemblyLinearVelocity = Vector3.zero
+	end
+
+	if freecamReturnTracer and root then
+		freecamReturnTracer.BackgroundColor3 = rainbowColor(0.35)
+		drawTracer(freecamReturnTracer, root.Position, true)
 	end
 end
 
@@ -1894,123 +1999,6 @@ local function updateAutoRun()
 	end
 end
 
-local autoAttackClock = 0
-local virtualUser = game:GetService("VirtualUser")
-
-local function fireMouseHit()
-	local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
-	local x = math.floor(viewport.X / 2)
-	local y = math.floor(viewport.Y / 2)
-	local sent = false
-
-	local okVirtualInput = pcall(function()
-		local vim = game:GetService("VirtualInputManager")
-		vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
-		vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
-	end)
-	sent = okVirtualInput
-
-	if not sent and typeof(mouse1click) == "function" then
-		sent = pcall(mouse1click)
-	end
-	if not sent and typeof(mouse1press) == "function" and typeof(mouse1release) == "function" then
-		sent = pcall(function()
-			mouse1press()
-			mouse1release()
-		end)
-	end
-	if not sent then
-		pcall(function()
-			local point = Vector2.new(x, y)
-			local clickCFrame = camera and camera.CFrame or CFrame.new()
-			virtualUser:Button1Down(point, clickCFrame)
-			virtualUser:Button1Up(point, clickCFrame)
-		end)
-	end
-end
-
-local function fireToolAttackSignals(tool)
-	local fired = false
-	local attackNames = {
-		attack = true,
-		hit = true,
-		swing = true,
-		slash = true,
-		punch = true,
-		use = true,
-		fire = true,
-		activate = true,
-		activated = true,
-	}
-
-	for _, descendant in ipairs(tool:GetDescendants()) do
-		local lowerName = string.lower(descendant.Name)
-		local looksLikeAttack = attackNames[lowerName]
-			or string.find(lowerName, "attack", 1, true)
-			or string.find(lowerName, "hit", 1, true)
-			or string.find(lowerName, "swing", 1, true)
-			or string.find(lowerName, "slash", 1, true)
-		if looksLikeAttack then
-			if descendant:IsA("BindableEvent") then
-				fired = true
-				pcall(function()
-					descendant:Fire()
-				end)
-			elseif descendant:IsA("RemoteEvent") then
-				fired = true
-				pcall(function()
-					descendant:FireServer()
-				end)
-			end
-		end
-	end
-
-	return fired
-end
-
-local function updateAutoAttack()
-	if not state.AutoAttack then
-		return
-	end
-
-	local now = os.clock()
-	if now - autoAttackClock < state.AutoAttackInterval then
-		return
-	end
-	autoAttackClock = now
-
-	local currentCharacter, hum = getCharacterParts()
-	if not currentCharacter or not hum then
-		return
-	end
-
-	local tool = currentCharacter:FindFirstChildOfClass("Tool")
-	if not tool then
-		local backpack = player:FindFirstChildOfClass("Backpack")
-		tool = backpack and backpack:FindFirstChildOfClass("Tool")
-		if tool then
-			pcall(function()
-				hum:EquipTool(tool)
-			end)
-		end
-	end
-
-	if tool then
-		pcall(function()
-			tool.Enabled = true
-		end)
-		pcall(function()
-			tool:Activate()
-		end)
-		fireToolAttackSignals(tool)
-		pcall(function()
-			tool:Deactivate()
-		end)
-	end
-
-	fireMouseHit()
-end
-
 --// ESP
 local function createBillboard(name, color, size)
 	local billboard = make("BillboardGui", {
@@ -2047,7 +2035,7 @@ local function createHighlight(color)
 	}, nil)
 end
 
-local function createTracer(color)
+function createTracer(color)
 	local frame = make("Frame", {
 		Name = "ControlPanelTracer",
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -2059,7 +2047,7 @@ local function createTracer(color)
 	return frame
 end
 
-local function drawTracer(frame, worldPosition, enabled)
+function drawTracer(frame, worldPosition, enabled)
 	if not enabled or not frame or not camera then
 		if frame then
 			frame.Visible = false
@@ -2196,6 +2184,15 @@ local function endsWith(text, suffix)
 	return string.sub(text, -#suffix) == suffix
 end
 
+local function isOreInstance(instance)
+	local lowerName = string.lower(instance.Name)
+	return lowerName ~= "node" and (endsWith(lowerName, " node") or endsWith(lowerName, "node"))
+end
+
+local function getOreColor(instance)
+	return oreFallbackColors[selectionName(instance)] or worldRules.Ore.color
+end
+
 local function shouldIncludeDropped(instance)
 	local cleanName = instance.Name:gsub("%s*%b()$", "")
 	if selections.Dropped[cleanName] ~= nil then
@@ -2240,7 +2237,7 @@ local function isRainbowEvent(instance)
 	return isTreasureChest(instance)
 end
 
-local function rainbowColor(speed)
+function rainbowColor(speed)
 	return Color3.fromHSV((os.clock() * (speed or 0.08)) % 1, 0.85, 1)
 end
 
@@ -2383,7 +2380,11 @@ local function getTotemHealth(instance)
 end
 
 function selectionName(instance)
-	return instance.Name:gsub("%s*%b()$", "")
+	local name = instance.Name:gsub("%s*%b()$", "")
+	if isOreInstance(instance) then
+		name = name:gsub("%s+[Nn][Oo][Dd][Ee]$", "")
+	end
+	return name
 end
 
 local function canBeWorldCandidate(instance)
@@ -2395,7 +2396,7 @@ local function canBeWorldCandidate(instance)
 	end
 
 	local potential =
-		endsWith(instance.Name, "Node")
+		isOreInstance(instance)
 		or shouldIncludeEntity(instance) and (
 			hasAnyTag(instance, worldRules.Entity.tags)
 			or isInsideFolderNamed(instance, worldRules.Entity.folders)
@@ -2443,7 +2444,7 @@ local function matchesWorldRule(instance, ruleName)
 
 	if ruleName == "Ore" then
 		local name = selectionName(instance)
-		return endsWith(instance.Name, "Node") and selections.Ore[name] ~= false
+		return name ~= "" and isOreInstance(instance) and selections.Ore[name] ~= false
 	end
 
 	if ruleName == "Entity" and not shouldIncludeEntity(instance) then
@@ -2512,6 +2513,7 @@ local function ensureWorldEsp(instance, ruleName)
 
 	local rule = worldRules[ruleName]
 	local color = ruleName == "Dropped" and adornee.Color
+		or ruleName == "Ore" and getOreColor(instance)
 		or ruleName == "Portal" and adornee.Color
 		or ruleName == "AntHill" and adornee.Color
 		or ruleName == "Totem" and getTotemColor(instance)
@@ -2547,7 +2549,9 @@ local function ensureWorldEsp(instance, ruleName)
 	obj.Text.TextSize = state.WorldTextSize
 	obj.Text.TextColor3 = ruleName == "Event" and isRainbowEvent(instance) and rainbowColor(0.08) or color
 
-	local label = ruleName == "Event" and getEventLabel(instance) or instance.Name
+	local label = ruleName == "Event" and getEventLabel(instance)
+		or ruleName == "Ore" and selectionName(instance)
+		or instance.Name
 	if ruleName == "Totem" then
 		local health = getTotemHealth(instance)
 		if health then
@@ -2571,9 +2575,9 @@ function updateWorldEsp()
 		{ "Portal", state.PortalEsp },
 		{ "AntHill", state.AntHillEsp },
 		{ "Totem", state.TotemEsp },
+		{ "Event", state.EventEsp },
 		{ "Ore", state.OreEsp },
 		{ "Entity", state.EntityEsp },
-		{ "Event", state.EventEsp },
 		{ "Dropped", state.DroppedEsp },
 	}
 
@@ -2588,34 +2592,34 @@ function updateWorldEsp()
 	end
 
 	local active = {}
-	local activeCount = 0
 	local ruleCounts = {}
-	local objectLimit = state.WorldMaxObjects
+	local ruleLimit = state.WorldMaxObjects
 	local droppedLimit = state.DroppedMaxObjects
 	if state.PerformanceGuard then
 		if perf.AverageFps > 0 and perf.AverageFps < 30 then
-			objectLimit = math.min(objectLimit, 35)
+			ruleLimit = math.min(ruleLimit, 35)
 			droppedLimit = math.min(droppedLimit, 15)
 		elseif perf.AverageFps > 0 and perf.AverageFps < 45 then
-			objectLimit = math.min(objectLimit, 60)
+			ruleLimit = math.min(ruleLimit, 60)
 			droppedLimit = math.min(droppedLimit, 25)
 		end
 	end
-	for _, instance in ipairs(getWorldCandidates()) do
-		if activeCount >= objectLimit then
-			break
-		end
-		for _, ruleInfo in ipairs(enabledRules) do
-			local ruleName, enabled = ruleInfo[1], ruleInfo[2]
-			if enabled and matchesWorldRule(instance, ruleName) then
-				if ruleName == "Dropped" and (ruleCounts.Dropped or 0) >= droppedLimit then
+	local candidates = getWorldCandidates()
+	for _, ruleInfo in ipairs(enabledRules) do
+		local ruleName, enabled = ruleInfo[1], ruleInfo[2]
+		if enabled then
+			local limit = ruleName == "Dropped" and droppedLimit
+				or ruleName == "Ore" and math.huge
+				or ruleLimit
+			for _, instance in ipairs(candidates) do
+				if (ruleCounts[ruleName] or 0) >= limit then
 					break
 				end
-				active[instance] = true
-				ensureWorldEsp(instance, ruleName)
-				activeCount += 1
-				ruleCounts[ruleName] = (ruleCounts[ruleName] or 0) + 1
-				break
+				if not active[instance] and matchesWorldRule(instance, ruleName) then
+					active[instance] = true
+					ensureWorldEsp(instance, ruleName)
+					ruleCounts[ruleName] = (ruleCounts[ruleName] or 0) + 1
+				end
 			end
 		end
 	end
@@ -2645,6 +2649,8 @@ perf = {
 }
 local worldScanTimer = 0
 local worldLabelTimer = 0
+local worldTracersLast = false
+local characterSettingsTimer = 0
 local fpsCounter = 0
 local fpsClock = os.clock()
 local fpsHistory = {}
@@ -2704,14 +2710,32 @@ end
 
 local function collectOreNames()
 	local names = {}
+	for _, name in ipairs(oreTypeNames) do
+		names[name] = true
+		if selections.Ore[name] == nil then
+			selections.Ore[name] = true
+		end
+	end
 	for instance in pairs(esp.Candidates) do
-		if instance.Parent and endsWith(instance.Name, "Node") then
-			names[selectionName(instance)] = true
+		if instance.Parent and isOreInstance(instance) then
+			local name = selectionName(instance)
+			if name ~= "" then
+				names[name] = true
+				if selections.Ore[name] == nil then
+					selections.Ore[name] = true
+				end
+			end
 		end
 	end
 	for _, descendant in ipairs(workspace:GetDescendants()) do
-		if endsWith(descendant.Name, "Node") then
-			names[selectionName(descendant)] = true
+		if (descendant:IsA("Model") or descendant:IsA("BasePart")) and isOreInstance(descendant) then
+			local name = selectionName(descendant)
+			if name ~= "" then
+				names[name] = true
+				if selections.Ore[name] == nil then
+					selections.Ore[name] = true
+				end
+			end
 		end
 	end
 	return sortedKeys(names)
@@ -2780,18 +2804,24 @@ sections.Movement = section(playerPage, "Movement")
 createToggle(sections.Movement, "Walk Speed", function() return state.WalkSpeedEnabled end, function(v)
 	state.WalkSpeedEnabled = v
 	applyCharacterSettings()
+	enforceMovementOverrides()
+	task.delay(0.1, enforceMovementOverrides)
 end)
 createSlider(sections.Movement, "Walk Speed", 0, 18, function() return state.WalkSpeed end, function(v)
 	state.WalkSpeed = v
 	applyCharacterSettings()
+	enforceMovementOverrides()
 end)
 createToggle(sections.Movement, "Jump Power", function() return state.JumpEnabled end, function(v)
 	state.JumpEnabled = v
 	applyCharacterSettings()
+	enforceMovementOverrides()
+	task.delay(0.1, enforceMovementOverrides)
 end)
 createSlider(sections.Movement, "Jump Power", 0, 75, function() return state.JumpPower end, function(v)
 	state.JumpPower = v
 	applyCharacterSettings()
+	enforceMovementOverrides()
 end)
 createToggle(sections.Movement, "No Slip", function() return state.NoSlip end, function(v)
 	state.NoSlip = v
@@ -2836,7 +2866,13 @@ end)
 
 sections.WorldKinds = section(worldPage, "World ESP")
 createToggle(sections.WorldKinds, "Ores", function() return state.OreEsp end, function(v) state.OreEsp = v; updateWorldEsp() end)
-createToggle(sections.WorldKinds, "Entities", function() return state.EntityEsp end, function(v) state.EntityEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "Entities", function() return state.EntityEsp end, function(v)
+	state.EntityEsp = v
+	updateWorldEsp()
+	if v then
+		notify("Entity ESP", "Use dropdown. All entity types default off.")
+	end
+end)
 createToggle(sections.WorldKinds, "Events", function() return state.EventEsp end, function(v) state.EventEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "God ESP", function() return state.GodEsp end, function(v) state.GodEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "Portal ESP", function() return state.PortalEsp end, function(v) state.PortalEsp = v; updateWorldEsp() end)
@@ -2863,9 +2899,7 @@ createToggle(sections.Settings, "Performance Stats", function() return state.Sta
 createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
 createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
 createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
-createKeybind(sections.Settings, "AutoAttack Key", "AutoAttackKey")
 freecamToggleRedraw = createToggle(sections.Settings, "Freecam", function() return state.Freecam end, setFreecam)
-autoAttackToggleRedraw = createToggle(sections.Settings, "AutoAttack", function() return state.AutoAttack end, function(v) state.AutoAttack = v end)
 createActionButton(sections.Settings, "Reset GUI", resetGuiLayout)
 
 sections.Teleport = section(settingsPage, "Teleports")
@@ -2966,10 +3000,17 @@ end)
 
 connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	if awaitingKeybindFor and input.KeyCode ~= Enum.KeyCode.Unknown then
+		if isTypingInTextBox() then
+			return
+		end
 		state[awaitingKeybindFor] = input.KeyCode
 		local changedKey = awaitingKeybindFor
 		awaitingKeybindFor = nil
 		updateKeybindText(changedKey)
+		return
+	end
+
+	if isTypingInTextBox() then
 		return
 	end
 
@@ -2990,25 +3031,17 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 		return
 	end
 
+	if gameProcessed then
+		return
+	end
+
 	if input.KeyCode == state.AutoRunKey then
 		state.AutoRun = not state.AutoRun
 		return
 	end
 
-	if input.KeyCode == state.AutoAttackKey then
-		state.AutoAttack = not state.AutoAttack
-		if autoAttackToggleRedraw then
-			autoAttackToggleRedraw()
-		end
-		return
-	end
-
 	if input.KeyCode == Enum.KeyCode.Escape then
 		closeDropdowns()
-		return
-	end
-
-	if gameProcessed then
 		return
 	end
 
@@ -3108,12 +3141,16 @@ end)
 
 connect(S.RunService.RenderStepped, function(dt)
 	camera = workspace.CurrentCamera
-	applyCharacterSettings()
+	characterSettingsTimer += dt
+	if characterSettingsTimer >= 0.25 then
+		characterSettingsTimer = 0
+		applyCharacterSettings()
+	end
+	enforceMovementOverrides()
 	updateFreecam(dt)
 	updateFly()
 	updateNoclip()
 	updateAutoRun()
-	updateAutoAttack()
 	updateStats()
 
 	if state.PlayerEsp then
@@ -3134,10 +3171,28 @@ connect(S.RunService.RenderStepped, function(dt)
 		updateWorldEsp()
 	end
 
+	if state.WorldTracers then
+		for _, obj in pairs(esp.World) do
+			if obj.Instance and obj.Instance.Parent and obj.Tracer then
+				local adornee = getAdornee(obj.Instance)
+				if adornee then
+					drawTracer(obj.Tracer, adornee.Position, true)
+				end
+			end
+		end
+	elseif worldTracersLast then
+		for _, obj in pairs(esp.World) do
+			if obj.Tracer then
+				drawTracer(obj.Tracer, Vector3.zero, false)
+			end
+		end
+	end
+	worldTracersLast = state.WorldTracers
+
 	worldLabelTimer += dt
-	local labelDelay = state.WorldTracers and 0.12 or state.WorldLabelRefreshTime
+	local labelDelay = state.WorldLabelRefreshTime
 	if state.PerformanceGuard and perf.AverageFps > 0 and perf.AverageFps < 45 then
-		labelDelay = state.WorldTracers and 0.25 or 0.65
+		labelDelay = 0.65
 	end
 	if worldLabelTimer >= labelDelay then
 		worldLabelTimer = 0
@@ -3148,13 +3203,16 @@ connect(S.RunService.RenderStepped, function(dt)
 				if adornee then
 					local rule = worldRules[obj.RuleName]
 					local color = obj.RuleName == "Dropped" and adornee.Color
+						or obj.RuleName == "Ore" and getOreColor(obj.Instance)
 						or obj.RuleName == "Portal" and adornee.Color
 						or obj.RuleName == "AntHill" and adornee.Color
 						or obj.RuleName == "Totem" and getTotemColor(obj.Instance)
 						or obj.RuleName == "God" and getGodColor(obj.Instance)
 						or obj.RuleName == "Event" and getEventColor(obj.Instance)
 						or rule.color
-					local label = obj.RuleName == "Event" and getEventLabel(obj.Instance) or obj.Instance.Name
+					local label = obj.RuleName == "Event" and getEventLabel(obj.Instance)
+						or obj.RuleName == "Ore" and selectionName(obj.Instance)
+						or obj.Instance.Name
 					if obj.RuleName == "Totem" then
 						local health = getTotemHealth(obj.Instance)
 						if health then
@@ -3172,7 +3230,9 @@ connect(S.RunService.RenderStepped, function(dt)
 					obj.Highlight.FillColor = color
 					obj.Highlight.OutlineColor = color
 					obj.Tracer.BackgroundColor3 = color
-					drawTracer(obj.Tracer, adornee.Position, state.WorldTracers)
+					if not state.WorldTracers then
+						drawTracer(obj.Tracer, adornee.Position, false)
+					end
 				end
 			end
 		end
