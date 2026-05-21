@@ -1849,8 +1849,15 @@ local function setFreecam(enabled)
 		if root then
 			root.Anchored = freecam.Original.RootAnchored == true
 		end
-		S.UserInputService.MouseBehavior = freecam.Original.MouseBehavior or Enum.MouseBehavior.Default
-		S.UserInputService.MouseIconEnabled = freecam.Original.MouseIconEnabled ~= false
+		for key in pairs(freecam.Keys) do
+			freecam.Keys[key] = false
+		end
+		S.UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		S.UserInputService.MouseIconEnabled = true
+		task.defer(function()
+			S.UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			S.UserInputService.MouseIconEnabled = true
+		end)
 		if freecamReturnTracer then
 			freecamReturnTracer.Visible = false
 		end
@@ -2612,7 +2619,7 @@ local function ensureWorldEsp(instance, ruleName)
 	obj.Highlight.OutlineColor = color
 	obj.Tracer.BackgroundColor3 = color
 	obj.Text.TextSize = state.WorldTextSize
-	obj.Text.TextColor3 = ruleName == "Event" and isRainbowEvent(instance) and rainbowColor(0.08) or color
+	obj.Text.TextColor3 = ruleName == "Event" and isRainbowEvent(instance) and rainbowColor(0.12) or color
 
 	local label = ruleName == "Event" and getEventLabel(instance)
 		or ruleName == "Ore" and selectionName(instance)
@@ -3254,6 +3261,22 @@ connect(S.RunService.RenderStepped, function(dt)
 	end
 	worldTracersLast = state.WorldTracers
 
+	for _, obj in pairs(esp.World) do
+		if obj.RuleName == "Event" and obj.Instance and obj.Instance.Parent and isRainbowEvent(obj.Instance) then
+			local color = rainbowColor(0.12)
+			if obj.Text then
+				obj.Text.TextColor3 = color
+			end
+			if obj.Highlight then
+				obj.Highlight.FillColor = color
+				obj.Highlight.OutlineColor = color
+			end
+			if obj.Tracer then
+				obj.Tracer.BackgroundColor3 = color
+			end
+		end
+	end
+
 	worldLabelTimer += dt
 	local labelDelay = state.WorldLabelRefreshTime
 	if state.PerformanceGuard and perf.AverageFps > 0 and perf.AverageFps < 45 then
@@ -3275,6 +3298,9 @@ connect(S.RunService.RenderStepped, function(dt)
 						or obj.RuleName == "God" and getGodColor(obj.Instance)
 						or obj.RuleName == "Event" and getEventColor(obj.Instance)
 						or rule.color
+					if obj.RuleName == "Event" and isRainbowEvent(obj.Instance) then
+						color = rainbowColor(0.12)
+					end
 					local label = obj.RuleName == "Event" and getEventLabel(obj.Instance)
 						or obj.RuleName == "Ore" and selectionName(obj.Instance)
 						or obj.Instance.Name
@@ -3289,7 +3315,7 @@ connect(S.RunService.RenderStepped, function(dt)
 					end
 					obj.Text.Text = label
 					obj.Text.TextSize = state.WorldTextSize
-					obj.Text.TextColor3 = obj.RuleName == "Event" and isRainbowEvent(obj.Instance) and rainbowColor(0.08) or color
+					obj.Text.TextColor3 = color
 					obj.Billboard.Enabled = state.WorldNames
 					obj.Highlight.Enabled = state.WorldChams
 					obj.Highlight.FillColor = color
