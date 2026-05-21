@@ -1864,7 +1864,10 @@ local function updateFreecam(dt)
 	if freecam.Keys.Up then move += Vector3.yAxis end
 	if freecam.Keys.Down then move -= Vector3.yAxis end
 
-	local speed = state.FreecamSpeed * (freecam.Keys.Boost and 5 or 1)
+	local shiftHeld = freecam.Keys.Boost
+		or S.UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+		or S.UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+	local speed = state.FreecamSpeed * (shiftHeld and 5 or 1)
 	if move.Magnitude > 0 then
 		freecam.CFrame = freecam.CFrame + move.Unit * speed * dt
 	end
@@ -2238,11 +2241,11 @@ local function isWanderingTrader(instance)
 	local dialogNPCs = workspace:FindFirstChild("DialogNPCs")
 	local normal = dialogNPCs and dialogNPCs:FindFirstChild("Normal")
 	local trader = normal and normal:FindFirstChild("Wandering Trader")
-	return trader ~= nil and (instance == trader or instance:IsDescendantOf(trader))
+	return trader ~= nil and instance == trader
 end
 
 local function isRainbowEvent(instance)
-	return isTreasureChest(instance)
+	return isTreasureChest(instance) or isWanderingTrader(instance)
 end
 
 function rainbowColor(speed)
