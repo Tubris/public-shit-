@@ -109,13 +109,14 @@ local selections = {
 		Coal = true,
 		Obsidian = true,
 		["Void Ore"] = true,
+		Emerald = true,
 	},
 	Entity = {},
 	Portal = {},
 	Dropped = {},
 }
 
-local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore" }
+local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
 local oreFallbackColors = {
 	Iron = Color3.fromRGB(185, 135, 85),
 	Stone = Color3.fromRGB(125, 125, 125),
@@ -124,6 +125,7 @@ local oreFallbackColors = {
 	Coal = Color3.fromRGB(35, 35, 35),
 	Obsidian = Color3.fromRGB(36, 24, 52),
 	["Void Ore"] = Color3.fromRGB(145, 80, 255),
+	Emerald = Color3.fromRGB(55, 220, 120),
 }
 local oreAliases = {
 	["Adurite Rich Rock"] = "Adurite",
@@ -131,6 +133,7 @@ local oreAliases = {
 	["Obsidian Deposit"] = "Obsidian",
 	["Obsidian Boulder"] = "Obsidian",
 	["Void Crag"] = "Void Ore",
+	["Emerald Lode"] = "Emerald",
 }
 
 local filteredDroppedItems = {
