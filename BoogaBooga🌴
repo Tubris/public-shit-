@@ -47,6 +47,7 @@ local defaults = {
 	CameraMaxZoom = player.CameraMaxZoomDistance,
 	DevCameraOcclusionMode = player.DevCameraOcclusionMode,
 	CameraFov = camera and camera.FieldOfView or 70,
+	Gravity = workspace.Gravity,
 }
 
 local state = {
@@ -54,6 +55,7 @@ local state = {
 	Minimized = false,
 	Stats = true,
 	HealthBar = true,
+	BloodFruitCounter = true,
 	Fullbright = false,
 	SeeRecipe = false,
 	ServerRegion = "NA East",
@@ -67,6 +69,7 @@ local state = {
 	WalkSpeed = 18,
 	JumpEnabled = false,
 	JumpPower = 75,
+	Gravity = workspace.Gravity,
 	NoSlip = true,
 	AutoHeal = true,
 	HealFallback = false,
@@ -264,6 +267,7 @@ local autoHeal = {
 	HealNotified = false,
 	HungerPendingFood = nil,
 	HungerPendingValue = nil,
+	HungerPendingSlot = nil,
 	HungerPendingTime = 0,
 	LastNoHealNotify = 0,
 	LastNoHungerNotify = 0,
@@ -513,6 +517,20 @@ local healthText = make("TextLabel", {
 	TextColor3 = Color3.fromRGB(255, 255, 255),
 	TextScaled = true,
 	TextStrokeTransparency = 0.45,
+	ZIndex = 82,
+}, healthBar)
+
+local bloodFruitCounter = make("TextLabel", {
+	Name = "BloodFruitCounter",
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, -0.18, 0),
+	Size = UDim2.new(1.35, 0, 0, 15),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Blood Fruit: 0",
+	TextColor3 = Color3.fromRGB(225, 150, 255),
+	TextSize = 10,
+	TextStrokeTransparency = 0.35,
 	ZIndex = 82,
 }, healthBar)
 
@@ -1541,10 +1559,15 @@ function updateAutoHunger(dt)
 	local hunger = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.stats and autoHeal.GameUtil.Data.stats.food
 	if autoHeal.HungerPendingFood then
 		if hunger and hunger > (autoHeal.HungerPendingValue or hunger) then
-			notify("Auto Hunger", string.format("Ate %s (+%.1f hunger).", autoHeal.HungerPendingFood, hunger - autoHeal.HungerPendingValue))
+			local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
+			local item = inventory and autoHeal.HungerPendingSlot and inventory[autoHeal.HungerPendingSlot]
+			local left = item and (tonumber(item.quantity) or 0) or 0
+			notify("Auto Hunger", string.format("Ate %s (+%.1f hunger). Left: %d", autoHeal.HungerPendingFood, hunger - autoHeal.HungerPendingValue, left))
 			autoHeal.HungerPendingFood = nil
+			autoHeal.HungerPendingSlot = nil
 		elseif os.clock() - autoHeal.HungerPendingTime > 4 then
 			autoHeal.HungerPendingFood = nil
+			autoHeal.HungerPendingSlot = nil
 		end
 	end
 	if autoHeal.HungerPendingFood then
@@ -1569,6 +1592,7 @@ function updateAutoHunger(dt)
 				end)
 				autoHeal.HungerPendingFood = foodName
 				autoHeal.HungerPendingValue = hunger
+				autoHeal.HungerPendingSlot = slot
 				autoHeal.HungerPendingTime = os.clock()
 				return
 			end
@@ -2091,6 +2115,9 @@ function applyCharacterSettings()
 	local targetSlope = state.NoSlip and 89.9 or defaults.MaxSlopeAngle
 	if hum.MaxSlopeAngle ~= targetSlope then
 		hum.MaxSlopeAngle = targetSlope
+	end
+	if workspace.Gravity ~= state.Gravity then
+		workspace.Gravity = state.Gravity
 	end
 	local targetZoom = state.InfCamera and 100000 or defaults.CameraMaxZoom
 	if player.CameraMaxZoomDistance ~= targetZoom then
@@ -3171,6 +3198,15 @@ function updateHealthBar()
 	})
 end
 
+function updateBloodFruitCounter()
+	bloodFruitCounter.Visible = state.HealthBar and state.BloodFruitCounter
+	if not bloodFruitCounter.Visible then
+		return
+	end
+	local _, item, quantity = findBloodfruit()
+	bloodFruitCounter.Text = string.format("Blood Fruit: %d", item and quantity or 0)
+end
+
 function sortedKeys(set)
 	local names = {}
 	for name in pairs(set) do
@@ -3299,6 +3335,10 @@ createSlider(sections.Movement, "Jump Power", 0, 75, function() return state.Jum
 	applyCharacterSettings()
 	enforceMovementOverrides()
 end)
+createSlider(sections.Movement, "Gravity", 0, 450, function() return state.Gravity end, function(v)
+	state.Gravity = v
+	applyCharacterSettings()
+end)
 createToggle(sections.Movement, "No Slip", function() return state.NoSlip end, function(v)
 	state.NoSlip = v
 	applyCharacterSettings()
@@ -3398,6 +3438,7 @@ createSlider(sections.WorldOptions, "Text Size", 10, 28, function() return state
 sections.Settings = section(settingsPage, "Interface")
 createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
+createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
 createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
 createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
 createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
@@ -3662,6 +3703,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateAutoHunger(dt)
 	updateStats()
 	updateHealthBar()
+	updateBloodFruitCounter()
 
 	if state.PlayerEsp then
 		for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
@@ -3779,6 +3821,7 @@ screenGui.Destroying:Connect(function()
 		setSeeRecipe(false, true)
 	end
 	stopFly()
+	workspace.Gravity = defaults.Gravity
 	player.CameraMaxZoomDistance = defaults.CameraMaxZoom
 	pcall(function()
 		player.DevCameraOcclusionMode = defaults.DevCameraOcclusionMode
