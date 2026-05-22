@@ -3,6 +3,7 @@ local placeId = game.PlaceId
 local supported = {
     [11729688377] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BoogaBooga'))()",
     [2317712696] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/WildWestMe'))()",
+    [11879754496] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BoogaBooga'))()",
 }
 
 local discordInviteCode = "SatFXKfdHa"
