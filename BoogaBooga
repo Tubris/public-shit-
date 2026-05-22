@@ -56,11 +56,15 @@ local state = {
 	PanelVisible = true,
 	Minimized = false,
 	Stats = true,
+	UncapFps = true,
 	HealthBar = true,
 	BloodFruitCounter = true,
 	Fullbright = false,
 	SeeRecipe = false,
+	Dance = false,
+	DanceEmote = "Irish Jig",
 	GuiThemeHue = 267,
+	GuiThemeRgb = false,
 	ServerRegion = "NA East",
 	ToggleKey = Enum.KeyCode.Return,
 	FreecamToggleKey = Enum.KeyCode.O,
@@ -289,9 +293,24 @@ local autoHeal = {
 	DropPacket = nil,
 	DropOrder = {},
 	LastNoDropNotify = 0,
+	DanceTrack = nil,
+	ThemeRgbTimer = 0,
 }
 local recipeView = {}
 local themeTargets = {}
+local themeRedraws = {}
+local danceEmotes = {
+	["Irish Jig"] = 3333432454,
+	Pushing = 4555808220,
+	["Country Dance"] = 4049037604,
+	["Roller Coaster"] = 4555782893,
+	Breakdance = 10214311282,
+	["James Charles"] = 10714010337,
+	["Senior Shuffle"] = 10713981723,
+	["Let Em Know"] = 10714372526,
+	["The Robot"] = 10714392151,
+	["Zay Dance"] = 11444443576,
+}
 
 function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -346,8 +365,12 @@ function make(className, props, parent)
 	return obj
 end
 
+function themeHue()
+	return state.GuiThemeRgb and ((tick() * 44) % 359) or (state.GuiThemeHue or 267)
+end
+
 function themeColor(saturation, value)
-	return Color3.fromHSV((state.GuiThemeHue or 267) / 359, saturation or 0.72, value or 1)
+	return Color3.fromHSV(themeHue() / 359, saturation or 0.72, value or 1)
 end
 
 function applyThemeTarget(target)
@@ -381,11 +404,8 @@ function applyGuiTheme()
 	for _, target in ipairs(themeTargets) do
 		applyThemeTarget(target)
 	end
-	for tabName, tab in pairs(tabButtons) do
-		tab.BackgroundColor3 = pages[tabName] and pages[tabName].Visible and themeColor(0.62, 0.82) or Color3.fromRGB(20, 16, 34)
-	end
-	if autoHeal.ThemeSliderRedraw then
-		autoHeal.ThemeSliderRedraw()
+	for _, redraw in ipairs(themeRedraws) do
+		pcall(redraw)
 	end
 end
 
@@ -393,6 +413,12 @@ function setCoreChatVisible(visible)
 	pcall(function()
 		S.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, visible)
 	end)
+end
+
+function applyFpsCap()
+	if typeof(setfpscap) == "function" then
+		pcall(setfpscap, state.UncapFps and 0 or 240)
+	end
 end
 
 function corner(parent, radius)
@@ -682,6 +708,7 @@ end
 task.delay(0.8, showLoadNotification)
 task.defer(function()
 	setCoreChatVisible(false)
+	applyFpsCap()
 end)
 
 --// Main panel
@@ -811,6 +838,12 @@ local tabButtons = {}
 local dropdownClosers = {}
 local openDropdowns = 0
 
+function syncPageScrolling()
+	for _, page in pairs(pages) do
+		page.ScrollingEnabled = openDropdowns == 0
+	end
+end
+
 local dropdownBlocker = make("TextButton", {
 	Name = "DropdownBlocker",
 	Size = UDim2.fromScale(1, 1),
@@ -833,6 +866,7 @@ function closeDropdowns()
 	end
 	openDropdowns = 0
 	dropdownBlocker.Visible = false
+	syncPageScrolling()
 end
 
 local content = make("Frame", {
@@ -867,6 +901,7 @@ function createPage(name)
 	}, page)
 
 	pages[name] = page
+	syncPageScrolling()
 	return page
 end
 
@@ -875,8 +910,12 @@ function activateTab(name)
 	for tabName, page in pairs(pages) do
 		page.Visible = tabName == name
 	end
+	redrawTabs()
+end
+
+function redrawTabs()
 	for tabName, button in pairs(tabButtons) do
-		local selected = tabName == name
+		local selected = pages[tabName] and pages[tabName].Visible
 		tween(button, nil, {
 			BackgroundColor3 = selected and themeColor(0.62, 0.82) or Color3.fromRGB(20, 16, 34),
 			BackgroundTransparency = selected and 0 or 0.1,
@@ -884,6 +923,7 @@ function activateTab(name)
 		})
 	end
 end
+table.insert(themeRedraws, redrawTabs)
 
 function createTab(name, order)
 	local button = make("TextButton", {
@@ -1007,6 +1047,7 @@ function createToggle(parent, label, getValue, setValue)
 		redraw()
 	end)
 
+	table.insert(themeRedraws, redraw)
 	redraw()
 	return redraw
 end
@@ -1092,6 +1133,69 @@ function createSlider(parent, label, min, max, getValue, setValue)
 
 	redraw()
 	return redraw
+end
+
+function createThemePicker(parent)
+	local row = make("Frame", {
+		Size = UDim2.new(1, 0, 0, 58),
+		BackgroundTransparency = 1,
+	}, parent)
+	make("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 18),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = "Gui Theme",
+		TextColor3 = Color3.fromRGB(240, 232, 250),
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	local swatches = make("Frame", {
+		Position = UDim2.new(0, 0, 0, 25),
+		Size = UDim2.new(1, 0, 0, 28),
+		BackgroundTransparency = 1,
+	}, row)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 6),
+	}, swatches)
+	for _, hue in ipairs({ 267, 205, 155, 95, 35, 350, 305, 0 }) do
+		local button = make("TextButton", {
+			Size = UDim2.new(0, 28, 0, 28),
+			BackgroundColor3 = Color3.fromHSV(hue / 359, 0.75, 1),
+			BorderSizePixel = 0,
+			AutoButtonColor = false,
+			Text = "",
+		}, swatches)
+		corner(button, 8)
+		connect(button.MouseButton1Click, function()
+			state.GuiThemeRgb = false
+			state.GuiThemeHue = hue
+			applyGuiTheme()
+		end)
+	end
+	local rgbButton = make("TextButton", {
+		Size = UDim2.new(0, 42, 0, 28),
+		BackgroundColor3 = Color3.fromHSV(0, 0.75, 1),
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Font = Enum.Font.GothamBold,
+		Text = "RGB",
+		TextColor3 = Color3.fromRGB(255, 255, 255),
+		TextSize = 11,
+	}, swatches)
+	corner(rgbButton, 8)
+	make("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 0.8, 1)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromHSV(0.45, 0.8, 1)),
+			ColorSequenceKeypoint.new(1, Color3.fromHSV(0.78, 0.8, 1)),
+		}),
+	}, rgbButton)
+	connect(rgbButton.MouseButton1Click, function()
+		state.GuiThemeRgb = true
+		applyGuiTheme()
+	end)
 end
 
 local awaitingKeybindFor
@@ -1854,6 +1958,50 @@ function updateAutoDrop(dt)
 	end
 end
 
+function stopDance()
+	if autoHeal.DanceTrack then
+		pcall(function()
+			autoHeal.DanceTrack:Stop()
+			autoHeal.DanceTrack:Destroy()
+		end)
+		autoHeal.DanceTrack = nil
+	end
+end
+
+function startDance()
+	stopDance()
+	local _, hum = getCharacterParts()
+	if not hum then
+		return
+	end
+	local animationId = danceEmotes[state.DanceEmote] or danceEmotes["Irish Jig"]
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. tostring(animationId)
+	local ok, track = pcall(function()
+		return hum:LoadAnimation(animation)
+	end)
+	if ok and track then
+		autoHeal.DanceTrack = track
+		track.Looped = true
+		track:Play()
+	end
+end
+
+function setDance(enabled)
+	state.Dance = enabled
+	if enabled then
+		startDance()
+	else
+		stopDance()
+	end
+end
+
+function updateDance()
+	if state.Dance and (not autoHeal.DanceTrack or not autoHeal.DanceTrack.IsPlaying) then
+		startDance()
+	end
+end
+
 function recipeItemName(itemID)
 	for name, id in pairs(recipeView.ItemIDs or {}) do
 		if id == itemID then
@@ -2112,6 +2260,7 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		if expanded then
 			openDropdowns = math.max(0, openDropdowns - 1)
 			dropdownBlocker.Visible = openDropdowns > 0
+			syncPageScrolling()
 		end
 		expanded = false
 		overlay.Visible = false
@@ -2134,6 +2283,7 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		if expanded then
 			openDropdowns += 1
 			dropdownBlocker.Visible = true
+			syncPageScrolling()
 			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
 			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, withSearch and 250 or 220)
 			refreshOptions()
@@ -2209,6 +2359,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		if expanded then
 			openDropdowns = math.max(0, openDropdowns - 1)
 			dropdownBlocker.Visible = openDropdowns > 0
+			syncPageScrolling()
 		end
 		expanded = false
 		overlay.Visible = false
@@ -2250,6 +2401,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		if expanded then
 			openDropdowns += 1
 			dropdownBlocker.Visible = true
+			syncPageScrolling()
 			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
 			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, (#choices * 30) + 12)
 		end
@@ -3744,12 +3896,33 @@ createSlider(sections.WorldOptions, "Text Size", 10, 28, function() return state
 
 sections.Settings = section(settingsPage, "Interface")
 createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
+createToggle(sections.Settings, "Uncap FPS", function() return state.UncapFps end, function(v)
+	state.UncapFps = v
+	applyFpsCap()
+end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
-autoHeal.ThemeSliderRedraw = createSlider(sections.Settings, "Gui Theme", 0, 359, function() return state.GuiThemeHue end, function(v)
-	state.GuiThemeHue = v
-	applyGuiTheme()
+createThemePicker(sections.Settings)
+createChoiceDropdown(sections.Settings, "Dance Emote", {
+	"Irish Jig",
+	"Pushing",
+	"Country Dance",
+	"Roller Coaster",
+	"Breakdance",
+	"James Charles",
+	"Senior Shuffle",
+	"Let Em Know",
+	"The Robot",
+	"Zay Dance",
+}, function()
+	return state.DanceEmote
+end, function(value)
+	state.DanceEmote = value
+	if state.Dance then
+		startDance()
+	end
 end)
+createToggle(sections.Settings, "Dance", function() return state.Dance end, setDance)
 createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
 createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
 createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
@@ -3977,6 +4150,9 @@ connect(player.CharacterAdded, function(newCharacter)
 	if state.Fly then
 		startFly()
 	end
+	if state.Dance then
+		startDance()
+	end
 end)
 
 connect(S.Players.PlayerRemoving, function(leaving)
@@ -4020,9 +4196,17 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateAutoHunger(dt)
 	updateAutoPickup(dt)
 	updateAutoDrop(dt)
+	updateDance()
 	updateStats()
 	updateHealthBar()
 	updateBloodFruitCounter()
+	if state.GuiThemeRgb then
+		autoHeal.ThemeRgbTimer += dt
+		if autoHeal.ThemeRgbTimer >= 0.04 then
+			autoHeal.ThemeRgbTimer = 0
+			applyGuiTheme()
+		end
+	end
 
 	if state.PlayerEsp then
 		for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
@@ -4139,6 +4323,10 @@ screenGui.Destroying:Connect(function()
 	if state.SeeRecipe then
 		setSeeRecipe(false, true)
 	end
+	if typeof(setfpscap) == "function" then
+		pcall(setfpscap, 240)
+	end
+	stopDance()
 	stopFly()
 	setCoreChatVisible(defaults.ChatEnabled)
 	workspace.Gravity = defaults.Gravity
