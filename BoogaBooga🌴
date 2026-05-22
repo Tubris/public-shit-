@@ -10,6 +10,7 @@ local S = {
 	TeleportService = game:GetService("TeleportService"),
 	HttpService = game:GetService("HttpService"),
 	Lighting = game:GetService("Lighting"),
+	StarterGui = game:GetService("StarterGui"),
 }
 
 local player = S.Players.LocalPlayer
@@ -27,15 +28,15 @@ local PLACE = {
 }
 
 local UI = {
-	NormalPanelPosition = UDim2.new(0, 18, 0.5, -190),
+	NormalPanelPosition = UDim2.new(0, 18, 0.830000011, -380),
 	NormalPanelSize = UDim2.new(0, 496, 0, 380),
-	NormalShadowPosition = UDim2.new(0, 8, 0.5, -202),
+	NormalShadowPosition = UDim2.new(0, 8, 0.830000011, -392),
 	NormalShadowSize = UDim2.new(0, 516, 0, 404),
-	NormalAuraPosition = UDim2.new(0, -2, 0.5, -212),
+	NormalAuraPosition = UDim2.new(0, -2, 0.830000011, -402),
 	NormalAuraSize = UDim2.new(0, 536, 0, 424),
 	MinPanelSize = UDim2.new(0, 496, 0, 48),
-	MinShadowSize = UDim2.new(0, 516, 0, 72),
-	MinAuraSize = UDim2.new(0, 536, 0, 92),
+	MinShadowSize = UDim2.new(0, 508, 0, 58),
+	MinAuraSize = UDim2.new(0, 516, 0, 66),
 }
 
 local defaults = {
@@ -48,6 +49,7 @@ local defaults = {
 	DevCameraOcclusionMode = player.DevCameraOcclusionMode,
 	CameraFov = camera and camera.FieldOfView or 70,
 	Gravity = workspace.Gravity,
+	ChatEnabled = true,
 }
 
 local state = {
@@ -58,6 +60,7 @@ local state = {
 	BloodFruitCounter = true,
 	Fullbright = false,
 	SeeRecipe = false,
+	GuiThemeHue = 267,
 	ServerRegion = "NA East",
 	ToggleKey = Enum.KeyCode.Return,
 	FreecamToggleKey = Enum.KeyCode.O,
@@ -65,17 +68,20 @@ local state = {
 	Freecam = false,
 	FreecamSpeed = 64,
 
-	WalkSpeedEnabled = false,
+	WalkSpeedEnabled = true,
 	WalkSpeed = 18,
 	JumpEnabled = false,
 	JumpPower = 75,
-	Gravity = workspace.Gravity,
+	Gravity = 196.2,
 	NoSlip = true,
 	AutoHeal = true,
 	HealFallback = false,
 	AutoHealHealth = 97,
 	AutoHunger = true,
 	AutoHungerLevel = 80,
+	AutoPickup = false,
+	AutoDrop = false,
+	AutoDropDelay = 10,
 	AutoRun = false,
 	Noclip = false,
 	InfCamera = true,
@@ -126,6 +132,7 @@ local selections = {
 	Entity = {},
 	Portal = {},
 	Dropped = {},
+	AutoDrop = {},
 	Food = {
 		["Cooked Meat"] = true,
 		["Cooked Fish"] = true,
@@ -270,11 +277,21 @@ local autoHeal = {
 	HungerPendingSlot = nil,
 	HungerPendingTime = 0,
 	LastNoHealNotify = 0,
-	LastNoHungerNotify = 0,
+	NoHungerAttempts = 0,
 	GameUtil = nil,
 	Packets = nil,
+	PickupModule = nil,
+	PickupRemote = nil,
+	PickupSound = nil,
+	PickupTimer = 0,
+	DropTimer = 0,
+	DropIndex = 1,
+	DropPacket = nil,
+	DropOrder = {},
+	LastNoDropNotify = 0,
 }
 local recipeView = {}
+local themeTargets = {}
 
 function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -329,16 +346,66 @@ function make(className, props, parent)
 	return obj
 end
 
+function themeColor(saturation, value)
+	return Color3.fromHSV((state.GuiThemeHue or 267) / 359, saturation or 0.72, value or 1)
+end
+
+function applyThemeTarget(target)
+	if not target.Obj or not target.Obj.Parent then
+		return
+	end
+	if target.Gradient then
+		target.Obj.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, themeColor(0.78, 0.36)),
+			ColorSequenceKeypoint.new(0.55, Color3.fromRGB(12, 8, 28)),
+			ColorSequenceKeypoint.new(1, themeColor(0.78, 0.56)),
+		})
+	else
+		target.Obj[target.Prop] = themeColor(target.Sat, target.Val)
+	end
+end
+
+function themeRegister(obj, prop, saturation, value)
+	table.insert(themeTargets, { Obj = obj, Prop = prop, Sat = saturation, Val = value })
+	applyThemeTarget(themeTargets[#themeTargets])
+	return obj
+end
+
+function themeGradient(obj)
+	table.insert(themeTargets, { Obj = obj, Gradient = true })
+	applyThemeTarget(themeTargets[#themeTargets])
+	return obj
+end
+
+function applyGuiTheme()
+	for _, target in ipairs(themeTargets) do
+		applyThemeTarget(target)
+	end
+	for tabName, tab in pairs(tabButtons) do
+		tab.BackgroundColor3 = pages[tabName] and pages[tabName].Visible and themeColor(0.62, 0.82) or Color3.fromRGB(20, 16, 34)
+	end
+end
+
+function setCoreChatVisible(visible)
+	pcall(function()
+		S.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, visible)
+	end)
+end
+
 function corner(parent, radius)
 	return make("UICorner", { CornerRadius = UDim.new(0, radius or 8) }, parent)
 end
 
 function stroke(parent, color, transparency, thickness)
-	return make("UIStroke", {
+	local outline = make("UIStroke", {
 		Color = color or Color3.fromRGB(65, 72, 86),
 		Transparency = transparency or 0.25,
 		Thickness = thickness or 1,
 	}, parent)
+	if color and color.B > color.G and color.R >= color.G then
+		themeRegister(outline, "Color", 0.5, 1)
+	end
+	return outline
 end
 
 function getCharacterParts()
@@ -433,14 +500,14 @@ local statsBar = make("Frame", {
 corner(statsBar, 14)
 stroke(statsBar, Color3.fromRGB(190, 130, 255), 0.18, 1)
 
-make("UIGradient", {
+themeGradient(make("UIGradient", {
 	Color = ColorSequence.new({
 		ColorSequenceKeypoint.new(0, Color3.fromRGB(50, 22, 95)),
 		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(18, 10, 34)),
 		ColorSequenceKeypoint.new(1, Color3.fromRGB(90, 35, 150)),
 	}),
 	Rotation = 18,
-}, statsBar)
+}, statsBar))
 
 make("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
@@ -455,12 +522,12 @@ make("UIPadding", {
 }, statsBar)
 
 function statPill(label)
-	local pill = make("Frame", {
+	local pill = themeRegister(make("Frame", {
 		Size = UDim2.new(0, 72, 0, 20),
 		BackgroundColor3 = Color3.fromRGB(210, 170, 255),
 		BackgroundTransparency = 0.86,
 		BorderSizePixel = 0,
-	}, statsBar)
+	}, statsBar), "BackgroundColor3", 0.38, 1)
 	corner(pill, 10)
 	stroke(pill, Color3.fromRGB(230, 205, 255), 0.68, 1)
 
@@ -520,7 +587,7 @@ local healthText = make("TextLabel", {
 	ZIndex = 82,
 }, healthBar)
 
-local bloodFruitCounter = make("TextLabel", {
+local bloodFruitCounter = themeRegister(make("TextLabel", {
 	Name = "BloodFruitCounter",
 	AnchorPoint = Vector2.new(0.5, 1),
 	Position = UDim2.new(0.5, 0, -0.18, 0),
@@ -532,7 +599,7 @@ local bloodFruitCounter = make("TextLabel", {
 	TextSize = 10,
 	TextStrokeTransparency = 0.35,
 	ZIndex = 82,
-}, healthBar)
+}, healthBar), "TextColor3", 0.42, 1)
 
 function showCustomNotification(titleText, bodyText, duration)
 	local body = bodyText or ""
@@ -551,14 +618,14 @@ function showCustomNotification(titleText, bodyText, duration)
 	corner(toast, 14)
 	stroke(toast, Color3.fromRGB(190, 135, 255), 0.2, 1)
 
-	make("UIGradient", {
+	themeGradient(make("UIGradient", {
 		Color = ColorSequence.new({
 			ColorSequenceKeypoint.new(0, Color3.fromRGB(38, 18, 82)),
 			ColorSequenceKeypoint.new(0.58, Color3.fromRGB(12, 8, 28)),
 			ColorSequenceKeypoint.new(1, Color3.fromRGB(72, 24, 118)),
 		}),
 		Rotation = 24,
-	}, toast)
+	}, toast))
 
 	make("TextLabel", {
 		Position = UDim2.new(0, 14, 0, 7),
@@ -610,9 +677,12 @@ function showLoadNotification()
 	showCustomNotification("Chubbison Me Loaded", "Gui Toggle: Return", 4)
 end
 task.delay(0.8, showLoadNotification)
+task.defer(function()
+	setCoreChatVisible(false)
+end)
 
 --// Main panel
-local mainAura = make("ImageLabel", {
+local mainAura = themeRegister(make("ImageLabel", {
 	Name = "MainAura",
 	Position = UI.NormalAuraPosition,
 	Size = UI.NormalAuraSize,
@@ -623,7 +693,7 @@ local mainAura = make("ImageLabel", {
 	ScaleType = Enum.ScaleType.Slice,
 	SliceCenter = Rect.new(49, 49, 49, 49),
 	ZIndex = 0,
-}, screenGui)
+}, screenGui), "ImageColor3", 0.78, 0.92)
 
 local mainShadow = make("ImageLabel", {
 	Name = "MainShadow",
@@ -651,7 +721,7 @@ local main = make("Frame", {
 corner(main, 18)
 stroke(main, Color3.fromRGB(205, 160, 255), 0.12, 1.5)
 
-make("UIGradient", {
+themeGradient(make("UIGradient", {
 	Color = ColorSequence.new({
 		ColorSequenceKeypoint.new(0, Color3.fromRGB(44, 18, 90)),
 		ColorSequenceKeypoint.new(0.34, Color3.fromRGB(8, 8, 24)),
@@ -659,7 +729,7 @@ make("UIGradient", {
 		ColorSequenceKeypoint.new(1, Color3.fromRGB(90, 30, 150)),
 	}),
 	Rotation = 28,
-}, main)
+}, main))
 
 local header = make("Frame", {
 	Name = "Header",
@@ -805,7 +875,7 @@ function activateTab(name)
 	for tabName, button in pairs(tabButtons) do
 		local selected = tabName == name
 		tween(button, nil, {
-			BackgroundColor3 = selected and Color3.fromRGB(124, 86, 210) or Color3.fromRGB(20, 16, 34),
+			BackgroundColor3 = selected and themeColor(0.62, 0.82) or Color3.fromRGB(20, 16, 34),
 			BackgroundTransparency = selected and 0 or 0.1,
 			TextColor3 = selected and Color3.fromRGB(255, 250, 255) or Color3.fromRGB(165, 150, 190),
 		})
@@ -815,7 +885,7 @@ end
 function createTab(name, order)
 	local button = make("TextButton", {
 		Name = name .. "Tab",
-		Size = UDim2.new(0.25, -3, 1, 0),
+		Size = UDim2.new(0.2, -3, 1, 0),
 		BackgroundColor3 = Color3.fromRGB(20, 16, 34),
 		BackgroundTransparency = 0.1,
 		BorderSizePixel = 0,
@@ -834,14 +904,16 @@ function createTab(name, order)
 end
 
 local playerPage = createPage("Player")
+local autoPage = createPage("Auto")
 local visualPage = createPage("Visuals")
 local worldPage = createPage("World")
 local settingsPage = createPage("Settings")
 
 createTab("Player", 1)
-createTab("Visuals", 2)
-createTab("World", 3)
-createTab("Settings", 4)
+createTab("Auto", 2)
+createTab("Visuals", 3)
+createTab("World", 4)
+createTab("Settings", 5)
 
 function section(parent, heading)
 	local box = make("Frame", {
@@ -918,12 +990,12 @@ function createToggle(parent, label, getValue, setValue)
 	local function redraw()
 		local on = getValue()
 		tween(button, nil, {
-			BackgroundColor3 = on and Color3.fromRGB(215, 175, 255) or Color3.fromRGB(255, 255, 255),
+			BackgroundColor3 = on and themeColor(0.38, 1) or Color3.fromRGB(255, 255, 255),
 			BackgroundTransparency = on and 0.08 or 0.9,
 		})
 		tween(knob, nil, {
 			Position = on and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
-			BackgroundColor3 = on and Color3.fromRGB(35, 13, 55) or Color3.fromRGB(190, 180, 205),
+			BackgroundColor3 = on and themeColor(0.78, 0.28) or Color3.fromRGB(190, 180, 205),
 		})
 	end
 
@@ -960,11 +1032,11 @@ function createSlider(parent, label, min, max, getValue, setValue)
 	}, row)
 	corner(bar, 3)
 
-	local fill = make("Frame", {
+	local fill = themeRegister(make("Frame", {
 		Size = UDim2.new(0, 0, 1, 0),
 		BackgroundColor3 = Color3.fromRGB(215, 175, 255),
 		BorderSizePixel = 0,
-	}, bar)
+	}, bar), "BackgroundColor3", 0.38, 1)
 	corner(fill, 3)
 
 	local knob = make("TextButton", {
@@ -1276,6 +1348,7 @@ end
 function resetGuiLayout()
 	closeDropdowns()
 	state.PanelVisible = true
+	setCoreChatVisible(false)
 	state.Minimized = false
 	main.Visible = true
 	mainAura.Visible = true
@@ -1590,6 +1663,7 @@ function updateAutoHunger(dt)
 				pcall(function()
 					autoHeal.Packets.UseBagItem.send(slot)
 				end)
+				autoHeal.NoHungerAttempts = 0
 				autoHeal.HungerPendingFood = foodName
 				autoHeal.HungerPendingValue = hunger
 				autoHeal.HungerPendingSlot = slot
@@ -1598,9 +1672,182 @@ function updateAutoHunger(dt)
 			end
 		end
 	end
-	if os.clock() - autoHeal.LastNoHungerNotify > 8 then
+	autoHeal.NoHungerAttempts += 1
+	if autoHeal.NoHungerAttempts % 10 == 0 then
 		notify("Auto Hunger", "No enabled food found.")
-		autoHeal.LastNoHungerNotify = os.clock()
+	end
+end
+
+function loadPickupModules()
+	if autoHeal.PickupModule and autoHeal.PickupRemote then
+		return true
+	end
+	local gameFolder = S.ReplicatedStorage:FindFirstChild("Game")
+	local modules = S.ReplicatedStorage:FindFirstChild("Modules")
+	local pickupModule = gameFolder and gameFolder:FindFirstChild("pickup")
+	local packetsModule = modules and modules:FindFirstChild("Packets")
+	if not pickupModule or not packetsModule then
+		return false
+	end
+	local okPickup, pickup = pcall(require, pickupModule)
+	local okPackets, packets = pcall(require, packetsModule)
+	if not okPickup or not okPackets or not packets.Pickup then
+		return false
+	end
+	local localSounds = S.ReplicatedStorage:FindFirstChild("LocalSounds")
+	local quicks = localSounds and localSounds:FindFirstChild("Quicks")
+	autoHeal.PickupModule = pickup
+	autoHeal.PickupRemote = packets.Pickup
+	autoHeal.PickupSound = quicks and quicks:FindFirstChild("Pickup")
+	return true
+end
+
+function animatePickupPart(part)
+	if not part or not part.Parent or not camera then
+		return
+	end
+	local currentCharacter = player.Character
+	if not currentCharacter then
+		return
+	end
+	local clone = part:Clone()
+	clone:ClearAllChildren()
+	pcall(function() clone:RemoveTag("Draggable") end)
+	pcall(function() clone:RemoveTag("Pickup") end)
+	clone.CanCollide = false
+	clone.Anchored = true
+	part:Destroy()
+	clone.Parent = camera
+	local tweenObj = S.TweenService:Create(clone, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		CFrame = currentCharacter:GetPivot(),
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		Transparency = 1,
+	})
+	tweenObj:Play()
+	tweenObj.Completed:Once(function()
+		if clone and clone.Parent then
+			clone:Destroy()
+		end
+	end)
+end
+
+function updateAutoPickup(dt)
+	if not state.AutoPickup then
+		return
+	end
+	autoHeal.PickupTimer += dt
+	if autoHeal.PickupTimer < 0.05 then
+		return
+	end
+	autoHeal.PickupTimer = 0
+	if not loadPickupModules() then
+		return
+	end
+	local currentCharacter, hum, root = getCharacterParts()
+	local itemsFolder = workspace:FindFirstChild("Items")
+	if not currentCharacter or not hum or hum.Health <= 0 or not root or not itemsFolder then
+		return
+	end
+	local closestPart, closestDist = nil, math.huge
+	for _, part in ipairs(itemsFolder:GetChildren()) do
+		if part:IsA("BasePart") and part:GetAttribute("EntityID") then
+			local dist = (root.Position - part.Position).Magnitude
+			if dist < closestDist then
+				closestDist = dist
+				closestPart = part
+			end
+		end
+	end
+	if closestPart and closestDist <= 25 and autoHeal.PickupModule.Try(closestPart) then
+		local entityID = closestPart:GetAttribute("EntityID")
+		if autoHeal.PickupSound then
+			autoHeal.PickupSound:Play()
+		end
+		if entityID then
+			autoHeal.PickupRemote.send(entityID)
+		end
+		animatePickupPart(closestPart)
+	end
+end
+
+function getDropPacket()
+	if autoHeal.DropPacket then
+		return autoHeal.DropPacket
+	end
+	if not loadAutoHealModules() then
+		return nil
+	end
+	for _, packetName in ipairs({ "DropBagItem", "DropItem", "Drop" }) do
+		local packet = autoHeal.Packets[packetName]
+		if packet and packet.send then
+			autoHeal.DropPacket = packet
+			return packet
+		end
+	end
+	return nil
+end
+
+function inventorySlotForName(itemName)
+	if not loadAutoHealModules() then
+		return nil
+	end
+	local ok, slot = pcall(function()
+		return autoHeal.GameUtil.hasItem(itemName)
+	end)
+	return ok and slot or nil
+end
+
+function updateAutoDrop(dt)
+	if not state.AutoDrop then
+		return
+	end
+	autoHeal.DropTimer += dt
+	if autoHeal.DropTimer < math.max(0.001, state.AutoDropDelay / 1000) then
+		return
+	end
+	autoHeal.DropTimer = 0
+	local packet = getDropPacket()
+	if not packet then
+		if os.clock() - autoHeal.LastNoDropNotify > 8 then
+			notify("Auto Drop", "No drop packet found.")
+			autoHeal.LastNoDropNotify = os.clock()
+		end
+		return
+	end
+	local names = {}
+	for _, name in ipairs(autoHeal.DropOrder) do
+		if selections.AutoDrop[name] and inventorySlotForName(name) then
+			table.insert(names, name)
+		end
+	end
+	for name, selected in pairs(selections.AutoDrop) do
+		if selected and inventorySlotForName(name) then
+			local found = false
+			for _, existingName in ipairs(names) do
+				found = found or existingName == name
+			end
+			if not found then
+				table.insert(names, name)
+			end
+		end
+	end
+	if #names == 0 then
+		if os.clock() - autoHeal.LastNoDropNotify > 8 then
+			notify("Auto Drop", "No selected inventory item found.")
+			autoHeal.LastNoDropNotify = os.clock()
+		end
+		return
+	end
+	if autoHeal.DropIndex > #names then
+		autoHeal.DropIndex = 1
+	end
+	local itemName = names[autoHeal.DropIndex]
+	local slot = inventorySlotForName(itemName)
+	autoHeal.DropIndex = autoHeal.DropIndex % #names + 1
+	if slot then
+		pcall(function()
+			packet.send(slot)
+		end)
 	end
 end
 
@@ -1817,6 +2064,23 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 
 		local function setRow(value)
 			selections[name] = value
+			if label == "Drop Items" then
+				if value then
+					local found = false
+					for _, existingName in ipairs(autoHeal.DropOrder) do
+						found = found or existingName == name
+					end
+					if not found then
+						table.insert(autoHeal.DropOrder, name)
+					end
+				else
+					for index = #autoHeal.DropOrder, 1, -1 do
+						if autoHeal.DropOrder[index] == name then
+							table.remove(autoHeal.DropOrder, index)
+						end
+					end
+				end
+			end
 			row.BackgroundColor3 = value and Color3.fromRGB(245, 245, 245) or Color3.fromRGB(20, 20, 23)
 			row.TextColor3 = value and Color3.fromRGB(5, 5, 6) or Color3.fromRGB(235, 235, 240)
 			updateWorldEsp()
@@ -2180,15 +2444,19 @@ function setFreecam(enabled)
 			freecam.Original.JumpPower = hum.JumpPower
 			freecam.Original.JumpHeight = hum.JumpHeight
 			freecam.Original.AutoRotate = hum.AutoRotate
-			hum.WalkSpeed = 0
-			hum.JumpPower = 0
-			hum.JumpHeight = 0
-			hum.AutoRotate = false
+			if not state.AutoRun then
+				hum.WalkSpeed = 0
+				hum.JumpPower = 0
+				hum.JumpHeight = 0
+				hum.AutoRotate = false
+			end
 		end
 		if root then
 			freecam.Original.RootAnchored = root.Anchored
-			root.Anchored = true
-			root.AssemblyLinearVelocity = Vector3.zero
+			if not state.AutoRun then
+				root.Anchored = true
+				root.AssemblyLinearVelocity = Vector3.zero
+			end
 		end
 		freecam.CFrame = camera.CFrame
 		local look = freecam.CFrame.LookVector
@@ -2263,15 +2531,20 @@ function updateFreecam(dt)
 	camera.CFrame = freecam.CFrame
 
 	local _, hum, root = getCharacterParts()
-	if hum then
+	if hum and not state.AutoRun then
 		hum.WalkSpeed = 0
 		hum.JumpPower = 0
 		hum.JumpHeight = 0
 		hum.AutoRotate = false
+	elseif hum then
+		hum.WalkSpeed = state.WalkSpeedEnabled and state.WalkSpeed or defaults.WalkSpeed
+		hum.AutoRotate = true
 	end
-	if root then
+	if root and not state.AutoRun then
 		root.Anchored = true
 		root.AssemblyLinearVelocity = Vector3.zero
+	elseif root then
+		root.Anchored = freecam.Original.RootAnchored == true
 	end
 
 	if freecamReturnTracer and root then
@@ -2382,7 +2655,7 @@ function updateNoclip()
 end
 
 function updateAutoRun()
-	if not state.AutoRun or state.Freecam or state.Fly then
+	if not state.AutoRun or state.Fly then
 		return
 	end
 
@@ -3310,6 +3583,21 @@ function collectFoodNames()
 	return foodTypeNames
 end
 
+function collectInventoryNames()
+	local names = {}
+	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
+		for _, item in pairs(autoHeal.GameUtil.Data.inventory) do
+			if item and item.name and item.quantity and item.quantity > 0 then
+				names[item.name] = true
+				if selections.AutoDrop[item.name] == nil then
+					selections.AutoDrop[item.name] = false
+				end
+			end
+		end
+	end
+	return sortedKeys(names)
+end
+
 --// UI content
 local sections = {}
 sections.Movement = section(playerPage, "Movement")
@@ -3354,7 +3642,7 @@ createToggle(sections.Movement, "Infinite Camera Zoom", function() return state.
 	applyCharacterSettings()
 end)
 
-sections.Healing = section(playerPage, "Healing")
+sections.Healing = section(autoPage, "Healing")
 createToggle(sections.Healing, "Auto Heal", function() return state.AutoHeal end, function(v)
 	state.AutoHeal = v
 	if v then
@@ -3378,10 +3666,26 @@ createSlider(sections.Healing, "Eat At Hunger", 0, 99, function() return state.A
 end)
 createFilterDropdown(sections.Healing, "Food Types", collectFoodNames, selections.Food, true)
 
-sections.Fly = section(playerPage, "Fly")
+sections.AutoDrop = section(autoPage, "Auto Drop")
+createToggle(sections.AutoDrop, "Auto Drop", function() return state.AutoDrop end, function(v)
+	state.AutoDrop = v
+	autoHeal.DropTimer = 0
+	autoHeal.DropIndex = 1
+end)
+createSlider(sections.AutoDrop, "Drop Delay MS", 1, 1000, function() return state.AutoDropDelay end, function(v)
+	state.AutoDropDelay = v
+end)
+createFilterDropdown(sections.AutoDrop, "Drop Items", collectInventoryNames, selections.AutoDrop, false, true)
+
+sections.Fly = section(autoPage, "Fly")
 createToggle(sections.Fly, "Fly Enabled", function() return state.Fly end, setFly)
 createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed end, function(v)
 	state.FlySpeed = v
+end)
+
+sections.AutoPickup = section(autoPage, "Pickup")
+createToggle(sections.AutoPickup, "Auto Pickup", function() return state.AutoPickup end, function(v)
+	state.AutoPickup = v
 end)
 
 sections.PlayerEsp = section(visualPage, "Player ESP")
@@ -3439,6 +3743,10 @@ sections.Settings = section(settingsPage, "Interface")
 createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
+createSlider(sections.Settings, "Gui Theme Hue", 0, 359, function() return state.GuiThemeHue end, function(v)
+	state.GuiThemeHue = v
+	applyGuiTheme()
+end)
 createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
 createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
 createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
@@ -3532,9 +3840,11 @@ connect(minimize.MouseButton1Click, function()
 	})
 	tween(mainShadow, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = state.Minimized and UI.MinShadowSize or UI.NormalShadowSize,
+		ImageTransparency = state.Minimized and 0.58 or 0.24,
 	})
 	tween(mainAura, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = state.Minimized and UI.MinAuraSize or UI.NormalAuraSize,
+		ImageTransparency = state.Minimized and 0.82 or 0.5,
 	})
 end)
 
@@ -3560,6 +3870,7 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 
 	if input.KeyCode == state.ToggleKey then
 		state.PanelVisible = not state.PanelVisible
+		setCoreChatVisible(not state.PanelVisible)
 		main.Visible = state.PanelVisible
 		mainAura.Visible = state.PanelVisible
 		mainShadow.Visible = state.PanelVisible
@@ -3590,19 +3901,19 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if input.KeyCode == Enum.KeyCode.W then
-		state.AutoRun = false
+		if not state.Freecam then state.AutoRun = false end
 		if not state.Freecam then movementKeys.Forward = true end
 		freecam.Keys.Forward = true
 	elseif input.KeyCode == Enum.KeyCode.S then
-		state.AutoRun = false
+		if not state.Freecam then state.AutoRun = false end
 		if not state.Freecam then movementKeys.Back = true end
 		freecam.Keys.Back = true
 	elseif input.KeyCode == Enum.KeyCode.A then
-		state.AutoRun = false
+		if not state.Freecam then state.AutoRun = false end
 		if not state.Freecam then movementKeys.Left = true end
 		freecam.Keys.Left = true
 	elseif input.KeyCode == Enum.KeyCode.D then
-		state.AutoRun = false
+		if not state.Freecam then state.AutoRun = false end
 		if not state.Freecam then movementKeys.Right = true end
 		freecam.Keys.Right = true
 	elseif input.KeyCode == Enum.KeyCode.Space then
@@ -3701,6 +4012,8 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateAutoRun()
 	updateAutoHeal(dt)
 	updateAutoHunger(dt)
+	updateAutoPickup(dt)
+	updateAutoDrop(dt)
 	updateStats()
 	updateHealthBar()
 	updateBloodFruitCounter()
@@ -3821,6 +4134,7 @@ screenGui.Destroying:Connect(function()
 		setSeeRecipe(false, true)
 	end
 	stopFly()
+	setCoreChatVisible(defaults.ChatEnabled)
 	workspace.Gravity = defaults.Gravity
 	player.CameraMaxZoomDistance = defaults.CameraMaxZoom
 	pcall(function()
@@ -3842,4 +4156,3 @@ screenGui.Destroying:Connect(function()
 	clearEsp(esp.Players)
 	clearEsp(esp.World)
 end)
-
