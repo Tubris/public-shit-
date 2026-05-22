@@ -2000,6 +2000,15 @@ local movementKeys = {
 	Down = false,
 }
 
+function clearMovementKeys()
+	for key in pairs(movementKeys) do
+		movementKeys[key] = false
+	end
+	for key in pairs(freecam.Keys) do
+		freecam.Keys[key] = false
+	end
+end
+
 function startFly()
 	local _, hum, root = getCharacterParts()
 	if not hum or not root then
@@ -2014,6 +2023,8 @@ function startFly()
 	end
 
 	hum.PlatformStand = true
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
 	flyVelocity = make("BodyVelocity", {
 		Name = "ControlPanelFlyVelocity",
 		MaxForce = Vector3.new(9e4, 9e4, 9e4),
@@ -2029,6 +2040,7 @@ function startFly()
 end
 
 function stopFly()
+	clearMovementKeys()
 	if flyVelocity then
 		flyVelocity:Destroy()
 		flyVelocity = nil
@@ -2237,6 +2249,7 @@ end
 
 function setFly(enabled)
 	state.Fly = enabled
+	clearMovementKeys()
 	if enabled then
 		startFly()
 	else
@@ -2269,6 +2282,9 @@ function updateFly()
 
 	if move.Magnitude > 0 then
 		move = move.Unit * state.FlySpeed
+	else
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
 	end
 
 	flyVelocity.Velocity = move
