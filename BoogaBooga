@@ -384,6 +384,9 @@ function applyGuiTheme()
 	for tabName, tab in pairs(tabButtons) do
 		tab.BackgroundColor3 = pages[tabName] and pages[tabName].Visible and themeColor(0.62, 0.82) or Color3.fromRGB(20, 16, 34)
 	end
+	if autoHeal.ThemeSliderRedraw then
+		autoHeal.ThemeSliderRedraw()
+	end
 end
 
 function setCoreChatVisible(visible)
@@ -1351,8 +1354,7 @@ function resetGuiLayout()
 	setCoreChatVisible(false)
 	state.Minimized = false
 	main.Visible = true
-	mainAura.Visible = true
-	mainShadow.Visible = true
+	syncMinimizedEffects()
 	content.Visible = true
 	tabs.Visible = true
 	minimize.Text = "-"
@@ -1624,6 +1626,7 @@ end
 function updateAutoHunger(dt)
 	if not state.AutoHunger then
 		autoHeal.HungerPendingFood = nil
+		autoHeal.NoHungerAttempts = 0
 		return
 	end
 	if not loadAutoHealModules() then
@@ -1673,7 +1676,7 @@ function updateAutoHunger(dt)
 		end
 	end
 	autoHeal.NoHungerAttempts += 1
-	if autoHeal.NoHungerAttempts % 10 == 0 then
+	if autoHeal.NoHungerAttempts % 30 == 0 then
 		notify("Auto Hunger", "No enabled food found.")
 	end
 end
@@ -3642,6 +3645,12 @@ createToggle(sections.Movement, "Infinite Camera Zoom", function() return state.
 	applyCharacterSettings()
 end)
 
+sections.Fly = section(playerPage, "Fly")
+createToggle(sections.Fly, "Fly Enabled", function() return state.Fly end, setFly)
+createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed end, function(v)
+	state.FlySpeed = v
+end)
+
 sections.Healing = section(autoPage, "Healing")
 createToggle(sections.Healing, "Auto Heal", function() return state.AutoHeal end, function(v)
 	state.AutoHeal = v
@@ -3676,12 +3685,6 @@ createSlider(sections.AutoDrop, "Drop Delay MS", 1, 1000, function() return stat
 	state.AutoDropDelay = v
 end)
 createFilterDropdown(sections.AutoDrop, "Drop Items", collectInventoryNames, selections.AutoDrop, false, true)
-
-sections.Fly = section(autoPage, "Fly")
-createToggle(sections.Fly, "Fly Enabled", function() return state.Fly end, setFly)
-createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed end, function(v)
-	state.FlySpeed = v
-end)
 
 sections.AutoPickup = section(autoPage, "Pickup")
 createToggle(sections.AutoPickup, "Auto Pickup", function() return state.AutoPickup end, function(v)
@@ -3743,7 +3746,7 @@ sections.Settings = section(settingsPage, "Interface")
 createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
-createSlider(sections.Settings, "Gui Theme Hue", 0, 359, function() return state.GuiThemeHue end, function(v)
+autoHeal.ThemeSliderRedraw = createSlider(sections.Settings, "Gui Theme", 0, 359, function() return state.GuiThemeHue end, function(v)
 	state.GuiThemeHue = v
 	applyGuiTheme()
 end)
@@ -3753,6 +3756,7 @@ createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
 createToggle(sections.Settings, "See Recipe", function() return state.SeeRecipe end, setSeeRecipe)
 freecamToggleRedraw = createToggle(sections.Settings, "Freecam", function() return state.Freecam end, setFreecam)
 createActionButton(sections.Settings, "Reset GUI", resetGuiLayout)
+createActionButton(sections.Settings, "Suicide", suicideLocalPlayer)
 
 sections.Teleport = section(settingsPage, "Teleports")
 createChoiceDropdown(sections.Teleport, "Server Region", { "NA East", "NA West", "EU", "Asia", "Oceania", "Any" }, function()
@@ -3769,9 +3773,6 @@ end)
 createActionButton(sections.Teleport, "Join Fullest Server", function()
 	joinServerBySize(true)
 end)
-
-sections.Danger = section(settingsPage, "Danger")
-createActionButton(sections.Danger, "Suicide", suicideLocalPlayer)
 
 activateTab("Player")
 
@@ -3830,11 +3831,17 @@ connect(S.UserInputService.InputEnded, function(input)
 	end
 end)
 
+function syncMinimizedEffects()
+	mainShadow.Visible = state.PanelVisible and not state.Minimized
+	mainAura.Visible = state.PanelVisible and not state.Minimized
+end
+
 connect(minimize.MouseButton1Click, function()
 	state.Minimized = not state.Minimized
 	content.Visible = not state.Minimized
 	tabs.Visible = not state.Minimized
 	minimize.Text = state.Minimized and "+" or "-"
+	syncMinimizedEffects()
 	tween(main, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = state.Minimized and UI.MinPanelSize or UI.NormalPanelSize,
 	})
@@ -3872,8 +3879,7 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 		state.PanelVisible = not state.PanelVisible
 		setCoreChatVisible(not state.PanelVisible)
 		main.Visible = state.PanelVisible
-		mainAura.Visible = state.PanelVisible
-		mainShadow.Visible = state.PanelVisible
+		syncMinimizedEffects()
 		closeDropdowns()
 		return
 	end
