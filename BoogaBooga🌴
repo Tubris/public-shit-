@@ -3321,13 +3321,13 @@ createToggle(sections.Healing, "Heal Fallback", function() return state.HealFall
 		notify("Heal Fallback", "Uses any food item if no Blood Fruit.")
 	end
 end)
-createSlider(sections.Healing, "Heal At HP", 1, 100, function() return state.AutoHealHealth end, function(v)
+createSlider(sections.Healing, "Heal At HP", 0, 99, function() return state.AutoHealHealth end, function(v)
 	state.AutoHealHealth = v
 end)
 createToggle(sections.Healing, "Auto Hunger", function() return state.AutoHunger end, function(v)
 	state.AutoHunger = v
 end)
-createSlider(sections.Healing, "Eat At Hunger", 1, 100, function() return state.AutoHungerLevel end, function(v)
+createSlider(sections.Healing, "Eat At Hunger", 0, 99, function() return state.AutoHungerLevel end, function(v)
 	state.AutoHungerLevel = v
 end)
 createFilterDropdown(sections.Healing, "Food Types", collectFoodNames, selections.Food, true)
