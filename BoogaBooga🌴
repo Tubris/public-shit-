@@ -45,6 +45,7 @@ local defaults = {
 	UseJumpPower = humanoid.UseJumpPower,
 	MaxSlopeAngle = humanoid.MaxSlopeAngle,
 	CameraMaxZoom = player.CameraMaxZoomDistance,
+	DevCameraOcclusionMode = player.DevCameraOcclusionMode,
 	CameraFov = camera and camera.FieldOfView or 70,
 }
 
@@ -2095,6 +2096,11 @@ function applyCharacterSettings()
 	if player.CameraMaxZoomDistance ~= targetZoom then
 		player.CameraMaxZoomDistance = targetZoom
 	end
+	pcall(function()
+		if player.DevCameraOcclusionMode ~= Enum.DevCameraOcclusionMode.Invisicam then
+			player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+		end
+	end)
 	if camera then
 		if camera.FieldOfView ~= state.PlayerFov then
 			camera.FieldOfView = state.PlayerFov
@@ -3774,6 +3780,9 @@ screenGui.Destroying:Connect(function()
 	end
 	stopFly()
 	player.CameraMaxZoomDistance = defaults.CameraMaxZoom
+	pcall(function()
+		player.DevCameraOcclusionMode = defaults.DevCameraOcclusionMode
+	end)
 	if camera then
 		camera.FieldOfView = defaults.CameraFov
 	end
