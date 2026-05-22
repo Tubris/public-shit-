@@ -3543,15 +3543,19 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if input.KeyCode == Enum.KeyCode.W then
+		state.AutoRun = false
 		if not state.Freecam then movementKeys.Forward = true end
 		freecam.Keys.Forward = true
 	elseif input.KeyCode == Enum.KeyCode.S then
+		state.AutoRun = false
 		if not state.Freecam then movementKeys.Back = true end
 		freecam.Keys.Back = true
 	elseif input.KeyCode == Enum.KeyCode.A then
+		state.AutoRun = false
 		if not state.Freecam then movementKeys.Left = true end
 		freecam.Keys.Left = true
 	elseif input.KeyCode == Enum.KeyCode.D then
+		state.AutoRun = false
 		if not state.Freecam then movementKeys.Right = true end
 		freecam.Keys.Right = true
 	elseif input.KeyCode == Enum.KeyCode.Space then
