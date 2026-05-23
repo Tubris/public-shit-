@@ -108,6 +108,7 @@ local state = {
 	PlayerTracers = false,
 	PlayerTools = true,
 	PlayerZayMode = false,
+	IslandRopeNotifier = true,
 	PlayerTextSize = 12,
 	PlayerFov = 100,
 
@@ -303,6 +304,8 @@ local autoHeal = {
 	HungerTimer = 0,
 	LastUse = 0,
 	HealNotified = false,
+	ExpectedHealth = nil,
+	ExpectedHealthUntil = 0,
 	HungerPendingFood = nil,
 	HungerPendingValue = nil,
 	HungerPendingSlot = nil,
@@ -322,6 +325,8 @@ local autoHeal = {
 	AuraRedraws = {},
 	WorldRainbowTimer = 0,
 	NoclipTimer = 0,
+	RopeTimer = 0,
+	RopeTouching = {},
 	ItemIDs = nil,
 	Toolbar = nil,
 	PlantItemIDs = {},
@@ -1784,20 +1789,48 @@ end
 function updateAutoHeal(dt)
 	if not state.AutoHeal then
 		autoHeal.HealNotified = false
+		autoHeal.ExpectedHealth = nil
 		return
 	end
 	autoHeal.Timer += dt
-	if autoHeal.Timer < 0.01 or os.clock() - autoHeal.LastUse < 0.01 then
+	if autoHeal.Timer < 0.001 or os.clock() - autoHeal.LastUse < 0.001 then
 		return
 	end
 	autoHeal.Timer = 0
 	local health = getLocalWorkspaceHealth()
-	if not health or health > state.AutoHealHealth then
+	if not health then
+		return
+	end
+	if autoHeal.ExpectedHealth and os.clock() < autoHeal.ExpectedHealthUntil then
+		health = math.max(health, autoHeal.ExpectedHealth)
+	elseif autoHeal.ExpectedHealth then
+		autoHeal.ExpectedHealth = nil
+	end
+	if health > state.AutoHealHealth then
 		autoHeal.HealNotified = false
 		return
 	end
 	local slot, _, quantity = findBloodfruit()
 	local usedItem = "Blood Fruit"
+	if slot and quantity > 0 then
+		local amount = math.min(quantity, math.ceil((state.AutoHealHealth - health) / 3))
+		if amount <= 0 then
+			return
+		end
+		for _ = 1, amount do
+			pcall(function()
+				autoHeal.Packets.UseBagItem.send(slot)
+			end)
+		end
+		autoHeal.LastUse = os.clock()
+		autoHeal.ExpectedHealth = health + amount * 3
+		autoHeal.ExpectedHealthUntil = os.clock() + 0.08
+		if not autoHeal.HealNotified then
+			notify("Auto Heal", string.format("Ate %d Blood Fruit at %d HP.", amount, math.floor(health + 0.5)))
+			autoHeal.HealNotified = true
+		end
+		return
+	end
 	if not slot or quantity <= 0 then
 		if state.HealFallback and loadAutoHealModules() then
 			for _, foodName in ipairs(foodTypeNames) do
@@ -2142,6 +2175,7 @@ function isMineAuraResource(resource)
 	local name = string.lower(resource.Name)
 	return isGodInstance(resource)
 		or isAncientTreeInstance(resource)
+		or resource.Name == "Crystal Guardian"
 		or isTreasureChest(resource)
 		or isMeteorCore(resource)
 		or resource.Name == "Feather Bush"
@@ -2221,9 +2255,7 @@ function refreshAuraCandidates()
 		local resourcesFolder = workspace:FindFirstChild("Resources")
 		if resourcesFolder then
 			for _, model in ipairs(resourcesFolder:GetChildren()) do
-				if isMineAuraResource(model) then
-					addAuraCandidate(candidates, model)
-				end
+				addAuraCandidate(candidates, model)
 			end
 		end
 		addAuraCandidate(candidates, workspace:FindFirstChild("Treasure Chest"))
@@ -2232,6 +2264,12 @@ function refreshAuraCandidates()
 		if moundsFolder then
 			for _, model in ipairs(moundsFolder:GetChildren()) do
 				addAuraCandidate(candidates, model)
+			end
+		end
+		local climbableFolder = workspace:FindFirstChild("ClimbableRegions")
+		if climbableFolder then
+			for _, part in ipairs(climbableFolder:GetChildren()) do
+				addAuraCandidate(candidates, part)
 			end
 		end
 		for _, model in ipairs(workspace:GetChildren()) do
@@ -3674,21 +3712,28 @@ function godCounterText(instance, health)
 	local now = os.clock()
 	local data = autoHeal.GodCounters[instance]
 	if not data then
-		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0 }
+		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0, Samples = { { Time = now, Health = health } } }
 		return string.format("Health: %d", math.floor(health + 0.5))
 	end
 
-	local elapsed = math.max(now - data.LastTime, 0.001)
 	if health < data.LastHealth then
-		local instantRate = (data.LastHealth - health) / elapsed
-		data.Rate = data.Rate > 0 and (data.Rate * 0.65 + instantRate * 0.35) or instantRate
 		data.LastDamageTime = now
 	elseif health > data.LastHealth then
 		data.Rate = 0
 		data.LastDamageTime = 0
+		data.Samples = {}
 	end
 	data.LastHealth = health
 	data.LastTime = now
+	table.insert(data.Samples, { Time = now, Health = health })
+	while #data.Samples > 1 and now - data.Samples[1].Time > 6 do
+		table.remove(data.Samples, 1)
+	end
+	local oldest = data.Samples[1]
+	if oldest and oldest.Health > health then
+		local window = math.max(now - oldest.Time, 0.001)
+		data.Rate = (oldest.Health - health) / window
+	end
 
 	if data.Rate > 0 and now - data.LastDamageTime <= 4 then
 		if not data.EtaText or now - data.LastEtaUpdate >= 1 then
@@ -4157,6 +4202,68 @@ function updateBloodFruitCounter()
 	bloodFruitCounter.Text = string.format("Blood Fruit: %d", item and quantity or 0)
 end
 
+function findClimbablePartAt(position)
+	local folder = workspace:FindFirstChild("ClimbableRegions")
+	if not folder then
+		return nil
+	end
+	for _, part in ipairs(folder:GetChildren()) do
+		if part:IsA("BasePart") and (part.Position - position).Magnitude <= 1 then
+			return part
+		end
+	end
+	return nil
+end
+
+function pointInsidePart(part, position)
+	local localPoint = part.CFrame:PointToObjectSpace(position)
+	local half = part.Size * 0.5 + Vector3.new(2, 4, 2)
+	return math.abs(localPoint.X) <= half.X and math.abs(localPoint.Y) <= half.Y and math.abs(localPoint.Z) <= half.Z
+end
+
+function updateIslandRopeNotifier(dt)
+	if not state.IslandRopeNotifier then
+		table.clear(autoHeal.RopeTouching)
+		return
+	end
+	autoHeal.RopeTimer += dt
+	if autoHeal.RopeTimer < 0.35 then
+		return
+	end
+	autoHeal.RopeTimer = 0
+	local ropes = {
+		Ancient = { Name = "Ancient Tree", Part = findClimbablePartAt(Vector3.new(-489.2002258300781, 234.5003662109375, -888.9686889648438)) },
+		Crystal = { Name = "Crystal", Part = findClimbablePartAt(Vector3.new(-518, 80.5, -607)) },
+	}
+	local playersFolder = workspace:FindFirstChild("Players")
+	if not playersFolder then
+		return
+	end
+	local active = {}
+	for _, model in ipairs(playersFolder:GetChildren()) do
+		if model.Name ~= player.Name and model:IsA("Model") then
+			local adornee = getAdornee(model)
+			if adornee then
+				for key, rope in pairs(ropes) do
+					if rope.Part and pointInsidePart(rope.Part, adornee.Position) then
+						local id = model.Name .. ":" .. key
+						active[id] = true
+						if not autoHeal.RopeTouching[id] then
+							autoHeal.RopeTouching[id] = true
+							notify("Island Rope", "player " .. model.Name .. " Is walking up " .. rope.Name .. " Island Rope")
+						end
+					end
+				end
+			end
+		end
+	end
+	for id in pairs(autoHeal.RopeTouching) do
+		if not active[id] then
+			autoHeal.RopeTouching[id] = nil
+		end
+	end
+end
+
 function sortedKeys(set)
 	local names = {}
 	for name in pairs(set) do
@@ -4435,6 +4542,7 @@ createToggle(sections.PlayerEsp, "Distance", function() return state.PlayerDista
 createToggle(sections.PlayerEsp, "Tracers", function() return state.PlayerTracers end, function(v) state.PlayerTracers = v end)
 createToggle(sections.PlayerEsp, "Tools", function() return state.PlayerTools end, function(v) state.PlayerTools = v end)
 createToggle(sections.PlayerEsp, "Zay Mode", function() return state.PlayerZayMode end, function(v) state.PlayerZayMode = v end)
+createToggle(sections.PlayerEsp, "Island Rope Notifier", function() return state.IslandRopeNotifier end, function(v) state.IslandRopeNotifier = v end)
 createToggle(sections.PlayerEsp, "Dropped Items", function() return state.DroppedEsp end, function(v) state.DroppedEsp = v; updateWorldEsp() end)
 createToggle(sections.PlayerEsp, "Fullbright", function() return state.Fullbright end, setFullbright)
 createSlider(sections.PlayerEsp, "Text Size", 10, 28, function() return state.PlayerTextSize end, function(v) state.PlayerTextSize = v end)
@@ -4806,6 +4914,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateStats()
 	updateHealthBar()
 	updateBloodFruitCounter()
+	updateIslandRopeNotifier(dt)
 	if state.GuiThemeRgb then
 		autoHeal.ThemeRgbTimer += dt
 		if autoHeal.ThemeRgbTimer >= 0.04 then
