@@ -2546,6 +2546,12 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 	end
 
 	local function refreshOptions()
+		for _, child in ipairs(options:GetChildren()) do
+			if child:IsA("TextButton") then
+				child:Destroy()
+			end
+		end
+		created = {}
 		for _, name in ipairs(getNames()) do
 			addOption(name)
 		end
@@ -4526,7 +4532,7 @@ end)
 
 connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	if awaitingKeybindFor and input.KeyCode ~= Enum.KeyCode.Unknown then
-		if gameProcessed or isTypingInTextBox() then
+		if isTypingInTextBox() then
 			return
 		end
 		state[awaitingKeybindFor] = input.KeyCode
@@ -4537,10 +4543,6 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if isTypingInTextBox() then
-		return
-	end
-
-	if gameProcessed then
 		return
 	end
 
@@ -4577,6 +4579,10 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 
 	if input.KeyCode == state.AuraKey then
 		setAllAurasFromKey()
+		return
+	end
+
+	if gameProcessed then
 		return
 	end
 
