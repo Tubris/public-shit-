@@ -70,6 +70,7 @@ local state = {
 	FreecamToggleKey = Enum.KeyCode.O,
 	AutoRunKey = Enum.KeyCode.Equals,
 	AutoPickupKey = Enum.KeyCode.Q,
+	AuraKey = Enum.KeyCode.L,
 	Freecam = false,
 	FreecamSpeed = 64,
 
@@ -86,13 +87,18 @@ local state = {
 	AutoHungerLevel = 80,
 	AutoPickup = false,
 	PickupEssence = true,
+	AutoHarvest = false,
+	AutoPlant = false,
 	AutoDrop = false,
-	AutoDropDelay = 10,
+	AutoDropDelay = 100,
 	AutoRun = false,
 	Noclip = false,
 	InfCamera = true,
 	Fly = false,
 	FlySpeed = 18,
+	WeaponAura = false,
+	MineAura = false,
+	MobAura = false,
 
 	PlayerEsp = true,
 	PlayerNames = true,
@@ -106,6 +112,7 @@ local state = {
 
 	OreEsp = false,
 	EntityEsp = false,
+	MobEsp = false,
 	EventEsp = true,
 	GodEsp = false,
 	PortalEsp = false,
@@ -121,6 +128,7 @@ local state = {
 	DroppedMaxObjects = 45,
 	WorldRefreshTime = 3.5,
 	WorldLabelRefreshTime = 0.35,
+	GodTreeCounter = true,
 	PerformanceGuard = true,
 }
 
@@ -195,6 +203,12 @@ local worldRules = {
 		folders = { "Entities", "Mobs", "Enemies", "NPCs" },
 		keywords = { "entity", "mob", "enemy", "wolf", "bear", "deer", "boar", "npc" },
 		color = Color3.fromRGB(255, 115, 115),
+	},
+	Mob = {
+		tags = {},
+		folders = { "Critters" },
+		keywords = {},
+		color = Color3.fromRGB(255, 145, 95),
 	},
 	Event = {
 		tags = { "Event", "WorldEvent", "EventObject" },
@@ -299,10 +313,17 @@ local autoHeal = {
 	PickupRemote = nil,
 	PickupSound = nil,
 	PickupTimer = 0,
+	FarmTimer = 0,
+	AuraTimer = 0,
+	AuraRedraws = {},
+	ItemIDs = nil,
+	Toolbar = nil,
+	BloodfruitSeedID = nil,
 	DropTimer = 0,
 	DropIndex = 1,
 	DropPacket = nil,
 	DropOrder = {},
+	GodCounters = {},
 	LastNoDropNotify = 0,
 	DanceTrack = nil,
 	ThemeRgbTimer = 0,
@@ -1671,6 +1692,35 @@ function loadAutoHealModules()
 	return true
 end
 
+function loadFarmModules()
+	if autoHeal.ItemIDs and autoHeal.Toolbar and autoHeal.BloodfruitSeedID then
+		return loadAutoHealModules()
+	end
+	if not loadAutoHealModules() then
+		return false
+	end
+	local modules = S.ReplicatedStorage:FindFirstChild("Modules")
+	local itemIdsModule = modules and modules:FindFirstChild("ItemIDS")
+	local toolbarModule = S.ReplicatedStorage:FindFirstChild("Game") and S.ReplicatedStorage.Game:FindFirstChild("toolbar")
+	local okIds, itemIds = pcall(require, itemIdsModule)
+	local okToolbar, toolbar = pcall(require, toolbarModule)
+	if not okIds or not okToolbar then
+		return false
+	end
+	autoHeal.ItemIDs = itemIds
+	autoHeal.Toolbar = toolbar
+	for key, value in pairs(itemIds) do
+		if key == "Bloodfruit" or key == "Blood Fruit" then
+			autoHeal.BloodfruitSeedID = value
+			break
+		elseif value == "Bloodfruit" or value == "Blood Fruit" then
+			autoHeal.BloodfruitSeedID = key
+			break
+		end
+	end
+	return autoHeal.BloodfruitSeedID ~= nil
+end
+
 function findBloodfruit()
 	if not loadAutoHealModules() then
 		return nil
@@ -2008,6 +2058,199 @@ function updateAutoDrop(dt)
 			packet.send(slot)
 		end)
 	end
+end
+
+function isBloodfruitSelected()
+	local selected = autoHeal.Toolbar and autoHeal.Toolbar.selectedFood
+	return selected == "Bloodfruit" or selected == "Blood Fruit"
+end
+
+function updateAutoFarm(dt)
+	if not state.AutoHarvest and not state.AutoPlant then
+		return
+	end
+	autoHeal.FarmTimer += dt
+	if autoHeal.FarmTimer < 0.04 then
+		return
+	end
+	autoHeal.FarmTimer = 0
+	if not loadFarmModules() then
+		return
+	end
+	local _, hum, root = getCharacterParts()
+	if not hum or hum.Health <= 0 or not root then
+		return
+	end
+
+	if state.AutoHarvest and autoHeal.Packets.Pickup then
+		for _, obj in ipairs(workspace:GetChildren()) do
+			if obj.Name == "Bloodfruit Bush" and obj:IsA("Model") then
+				local entityID = obj:GetAttribute("EntityID")
+				if entityID and (root.Position - obj:GetPivot().Position).Magnitude <= 25 then
+					pcall(autoHeal.Packets.Pickup.send, entityID)
+				end
+			end
+		end
+	end
+
+	if state.AutoPlant and isBloodfruitSelected() and autoHeal.Packets.InteractStructure then
+		local deployables = workspace:FindFirstChild("Deployables")
+		if not deployables then
+			return
+		end
+		for _, obj in ipairs(deployables:GetChildren()) do
+			if obj.Name == "Plant Box" and obj:IsA("Model") and not obj:FindFirstChild("Seed") then
+				local entityID = obj:GetAttribute("EntityID")
+				if entityID and (root.Position - obj:GetPivot().Position).Magnitude <= 8 then
+					pcall(autoHeal.Packets.InteractStructure.send, {
+						entityID = entityID,
+						itemID = autoHeal.BloodfruitSeedID,
+					})
+				end
+			end
+		end
+	end
+end
+
+function isMineAuraResource(resource)
+	local name = string.lower(resource.Name)
+	return isGodInstance(resource)
+		or isAncientTreeInstance(resource)
+		or isTreasureChest(resource)
+		or isMeteorCore(resource)
+		or resource.Name == "Feather Bush"
+		or resource.Name == "Feather Stone"
+		or string.find(name, "tree", 1, true)
+		or string.find(name, "node", 1, true)
+		or string.find(name, "rock", 1, true)
+		or string.find(name, "stone", 1, true)
+		or string.find(name, "bush", 1, true)
+		or string.find(name, "ore", 1, true)
+		or string.find(name, "deposit", 1, true)
+		or string.find(name, "boulder", 1, true)
+		or string.find(name, "crag", 1, true)
+		or string.find(name, "lode", 1, true)
+end
+
+function addAuraTarget(list, model, rootPosition)
+	if not model or not model:IsA("Model") then
+		return
+	end
+	local entityID = model:GetAttribute("EntityID")
+	if not entityID then
+		return
+	end
+	local position = model:GetPivot().Position
+	local distance = (rootPosition - position).Magnitude
+	if distance <= 25 then
+		table.insert(list, { EntityID = entityID, Position = position, Distance = distance })
+	end
+end
+
+function collectAuraTargets(rootPosition)
+	local targets = {}
+	if state.WeaponAura then
+		local playersFolder = workspace:FindFirstChild("Players")
+		if playersFolder then
+			for _, model in ipairs(playersFolder:GetChildren()) do
+				if model.Name ~= player.Name and model ~= character then
+					addAuraTarget(targets, model, rootPosition)
+				end
+			end
+		end
+	end
+	if state.MobAura then
+		local crittersFolder = workspace:FindFirstChild("Critters")
+		if crittersFolder then
+			for _, model in ipairs(crittersFolder:GetChildren()) do
+				addAuraTarget(targets, model, rootPosition)
+			end
+		end
+	end
+	if state.MineAura then
+		local resourcesFolder = workspace:FindFirstChild("Resources")
+		if resourcesFolder then
+			for _, model in ipairs(resourcesFolder:GetChildren()) do
+				if isMineAuraResource(model) then
+					addAuraTarget(targets, model, rootPosition)
+				end
+			end
+		end
+		for _, model in ipairs({ workspace:FindFirstChild("Treasure Chest"), workspace:FindFirstChild("TreasureChest") }) do
+			addAuraTarget(targets, model, rootPosition)
+		end
+		for _, model in ipairs(workspace:GetChildren()) do
+			if isMeteorCore(model) then
+				addAuraTarget(targets, model, rootPosition)
+			end
+		end
+	end
+	table.sort(targets, function(a, b)
+		return a.Distance < b.Distance
+	end)
+	return targets
+end
+
+function updateAuras(dt)
+	if not state.WeaponAura and not state.MineAura and not state.MobAura then
+		return
+	end
+	autoHeal.AuraTimer += dt
+	if autoHeal.AuraTimer < 0.25 then
+		return
+	end
+	autoHeal.AuraTimer = 0
+	if not loadAutoHealModules() or not autoHeal.Packets.SwingTool then
+		return
+	end
+	local currentCharacter, hum, root = getCharacterParts()
+	if not currentCharacter or not hum or hum.Health <= 0 or not root then
+		return
+	end
+	local targets = collectAuraTargets(root.Position)
+	if #targets == 0 then
+		return
+	end
+	local closest = targets[1]
+	local direction = closest.Position - root.Position
+	if direction.Magnitude <= 0 then
+		return
+	end
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	local spoofedCFrame = flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
+	local entityList = {}
+	for _, target in ipairs(targets) do
+		table.insert(entityList, { entityID = target.EntityID, buffer = nil })
+	end
+	pcall(function()
+		autoHeal.Packets.SwingTool.send({
+			entityIDs = entityList,
+			cframe = spoofedCFrame,
+			timestamp = tick(),
+		})
+	end)
+end
+
+function auraMessage(name)
+	return name == "Weapon Aura" and "Attacks players only."
+		or name == "Mine Aura" and "Attacks trees/ores only."
+		or "Attacks critters only."
+end
+
+function setAura(stateKey, value, label)
+	state[stateKey] = value
+	notify(label, (value and "On - " or "Off - ") .. auraMessage(label))
+end
+
+function setAllAurasFromKey()
+	local turnOn = not (state.WeaponAura and state.MineAura and state.MobAura)
+	state.WeaponAura = turnOn
+	state.MineAura = turnOn
+	state.MobAura = turnOn
+	for _, redraw in pairs(autoHeal.AuraRedraws) do
+		redraw()
+	end
+	notify("Auras", turnOn and "All auras activated." or "All auras deactivated.")
 end
 
 function stopDance()
@@ -3189,12 +3432,24 @@ function isTreasureChest(instance)
 	return normalized == "treasurechest"
 end
 
+function isGrayColor(color)
+	return math.abs(color.R - color.G) < 0.045 and math.abs(color.G - color.B) < 0.045 and math.abs(color.R - color.B) < 0.045
+end
+
 function isMeteorCore(instance)
-	return instance:IsA("Model") and instance.Name == "Meteor Core"
+	if not instance:IsA("Model") or not string.find(string.lower(instance.Name), "meteor", 1, true) then
+		return false
+	end
+	local smallRock = instance:FindFirstChild("Small Rock", true)
+	return smallRock and smallRock:IsA("BasePart") and not isGrayColor(smallRock.Color)
 end
 
 function isWanderingTrader(instance)
 	return instance == getWanderingTraderBody()
+end
+
+function isMobInstance(instance)
+	return instance:IsA("Model") and isInWorkspaceFolder(instance, "Critters") and getAdornee(instance) ~= nil
 end
 
 function isRainbowEvent(instance)
@@ -3285,6 +3540,47 @@ function getGodHealth(instance)
 	end
 	health = instance:FindFirstChild("Health", true)
 	return health and health:IsA("IntValue") and health.Value or nil
+end
+
+function formatEta(seconds)
+	seconds = math.max(0, math.floor(seconds + 0.5))
+	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
+end
+
+function godCounterText(instance, health)
+	if not state.GodTreeCounter or not health then
+		autoHeal.GodCounters[instance] = nil
+		return health and string.format("Health: %d", math.floor(health + 0.5)) or ""
+	end
+
+	local now = os.clock()
+	local data = autoHeal.GodCounters[instance]
+	if not data then
+		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0 }
+		return string.format("Health: %d", math.floor(health + 0.5))
+	end
+
+	local elapsed = math.max(now - data.LastTime, 0.001)
+	if health < data.LastHealth then
+		local instantRate = (data.LastHealth - health) / elapsed
+		data.Rate = data.Rate > 0 and (data.Rate * 0.65 + instantRate * 0.35) or instantRate
+		data.LastDamageTime = now
+	elseif health > data.LastHealth then
+		data.Rate = 0
+		data.LastDamageTime = 0
+	end
+	data.LastHealth = health
+	data.LastTime = now
+
+	if data.Rate > 0 and now - data.LastDamageTime <= 4 then
+		if not data.EtaText or now - data.LastEtaUpdate >= 1 then
+			data.EtaText = formatEta(health / data.Rate)
+			data.LastEtaUpdate = now
+		end
+		return string.format("Health: %d | %s", math.floor(health + 0.5), data.EtaText)
+	end
+	data.EtaText = nil
+	return string.format("Health: %d", math.floor(health + 0.5))
 end
 
 function getFolder(name)
@@ -3399,6 +3695,7 @@ function canBeWorldCandidate(instance)
 		or isTreasureChest(instance)
 		or isMeteorCore(instance)
 		or isWanderingTrader(instance)
+		or isMobInstance(instance)
 		or isAncientTreeInstance(instance)
 		or isGodInstance(instance)
 		or isPortalInstance(instance)
@@ -3429,6 +3726,7 @@ function untrackWorldCandidate(instance)
 		if esp.World[instance].Tracer then esp.World[instance].Tracer:Destroy() end
 		esp.World[instance] = nil
 	end
+	autoHeal.GodCounters[instance] = nil
 end
 
 function matchesWorldRule(instance, ruleName)
@@ -3451,6 +3749,10 @@ function matchesWorldRule(instance, ruleName)
 		if selections.Entity[name] ~= true then
 			return false
 		end
+	end
+
+	if ruleName == "Mob" then
+		return isMobInstance(instance)
 	end
 
 	if ruleName == "Event" then
@@ -3568,7 +3870,7 @@ function ensureWorldEsp(instance, ruleName)
 	if obj.SubText then
 		local health = ruleName == "God" and getGodHealth(instance)
 		obj.SubText.Visible = ruleName == "God" and health ~= nil
-		obj.SubText.Text = health and string.format("Health: %d", math.floor(health + 0.5)) or ""
+		obj.SubText.Text = health and godCounterText(instance, health) or ""
 		obj.SubText.TextColor3 = textColor
 		obj.SubText.TextSize = math.max(10, state.WorldTextSize - 2)
 	end
@@ -3587,6 +3889,7 @@ function updateWorldEsp()
 		{ "Totem", state.TotemEsp },
 		{ "Event", state.EventEsp },
 		{ "Ore", state.OreEsp },
+		{ "Mob", state.MobEsp },
 		{ "Entity", state.EntityEsp },
 		{ "Dropped", state.DroppedEsp },
 	}
@@ -3846,7 +4149,7 @@ function collectInventoryNames()
 			if item and item.name and item.quantity and item.quantity > 0 then
 				names[item.name] = true
 				if selections.AutoDrop[item.name] == nil then
-					selections.AutoDrop[item.name] = false
+					selections.AutoDrop[item.name] = string.find(string.lower(item.name), "raw", 1, true) ~= nil
 				end
 			end
 		end
@@ -3904,6 +4207,17 @@ createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed 
 	state.FlySpeed = v
 end)
 
+sections.Auras = section(playerPage, "Auras")
+autoHeal.AuraRedraws.Weapon = createToggle(sections.Auras, "Weapon Aura", function() return state.WeaponAura end, function(v)
+	setAura("WeaponAura", v, "Weapon Aura")
+end)
+autoHeal.AuraRedraws.Mine = createToggle(sections.Auras, "Mine Aura", function() return state.MineAura end, function(v)
+	setAura("MineAura", v, "Mine Aura")
+end)
+autoHeal.AuraRedraws.Mob = createToggle(sections.Auras, "Mob Aura", function() return state.MobAura end, function(v)
+	setAura("MobAura", v, "Mob Aura")
+end)
+
 sections.Healing = section(autoPage, "Healing")
 createToggle(sections.Healing, "Auto Heal", function() return state.AutoHeal end, function(v)
 	state.AutoHeal = v
@@ -3948,6 +4262,17 @@ createToggle(sections.AutoPickup, "Pickup Essence", function() return state.Pick
 	state.PickupEssence = v
 end)
 
+sections.AutoFarm = section(autoPage, "Farming")
+createToggle(sections.AutoFarm, "Auto Harvest", function() return state.AutoHarvest end, function(v)
+	state.AutoHarvest = v
+end)
+createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant end, function(v)
+	state.AutoPlant = v
+	if v then
+		notify("Auto Plant", "Equip your Hoe ya Hoe")
+	end
+end)
+
 sections.PlayerEsp = section(visualPage, "Player ESP")
 createToggle(sections.PlayerEsp, "Enabled", function() return state.PlayerEsp end, function(v)
 	state.PlayerEsp = v
@@ -3978,6 +4303,7 @@ createToggle(sections.WorldKinds, "Entities", function() return state.EntityEsp 
 		notify("Entity ESP", "Use dropdown. All entity types default off.")
 	end
 end)
+createToggle(sections.WorldKinds, "Mob ESP", function() return state.MobEsp end, function(v) state.MobEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "Events", function() return state.EventEsp end, function(v) state.EventEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "God ESP", function() return state.GodEsp end, function(v) state.GodEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "Portal ESP", function() return state.PortalEsp end, function(v) state.PortalEsp = v; updateWorldEsp() end)
@@ -4007,6 +4333,12 @@ createToggle(sections.Settings, "Uncap FPS", function() return state.UncapFps en
 end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
+createToggle(sections.Settings, "God/Tree Counter", function() return state.GodTreeCounter end, function(v)
+	state.GodTreeCounter = v
+	if not v then
+		autoHeal.GodCounters = {}
+	end
+end)
 createThemePicker(sections.Settings)
 createChoiceDropdown(sections.Settings, "Dance Emote", {
 	"Irish Jig",
@@ -4032,6 +4364,7 @@ createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
 createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
 createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
 createKeybind(sections.Settings, "Auto Pickup Key", "AutoPickupKey")
+createKeybind(sections.Settings, "Aura Key", "AuraKey")
 createToggle(sections.Settings, "See Recipe", function() return state.SeeRecipe end, setSeeRecipe)
 freecamToggleRedraw = createToggle(sections.Settings, "Freecam", function() return state.Freecam end, setFreecam)
 createActionButton(sections.Settings, "Reset GUI", resetGuiLayout)
@@ -4140,7 +4473,7 @@ end)
 
 connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	if awaitingKeybindFor and input.KeyCode ~= Enum.KeyCode.Unknown then
-		if isTypingInTextBox() then
+		if gameProcessed or isTypingInTextBox() then
 			return
 		end
 		state[awaitingKeybindFor] = input.KeyCode
@@ -4151,6 +4484,10 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if isTypingInTextBox() then
+		return
+	end
+
+	if gameProcessed then
 		return
 	end
 
@@ -4171,10 +4508,6 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 		return
 	end
 
-	if gameProcessed then
-		return
-	end
-
 	if input.KeyCode == state.AutoRunKey then
 		state.AutoRun = not state.AutoRun
 		return
@@ -4186,6 +4519,11 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 			autoPickupToggleRedraw()
 		end
 		notify("Auto Pickup", state.AutoPickup and "On" or "Off")
+		return
+	end
+
+	if input.KeyCode == state.AuraKey then
+		setAllAurasFromKey()
 		return
 	end
 
@@ -4311,6 +4649,8 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateAutoHunger(dt)
 	updateAutoPickup(dt)
 	updateAutoDrop(dt)
+	updateAutoFarm(dt)
+	updateAuras(dt)
 	updateDance()
 	updateStats()
 	updateHealthBar()
@@ -4421,7 +4761,7 @@ connect(S.RunService.RenderStepped, function(dt)
 					if obj.SubText then
 						local health = obj.RuleName == "God" and getGodHealth(obj.Instance)
 						obj.SubText.Visible = obj.RuleName == "God" and health ~= nil
-						obj.SubText.Text = health and string.format("Health: %d", math.floor(health + 0.5)) or ""
+						obj.SubText.Text = health and godCounterText(obj.Instance, health) or ""
 						obj.SubText.TextSize = math.max(10, state.WorldTextSize - 2)
 						obj.SubText.TextColor3 = textColor
 					end
