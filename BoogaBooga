@@ -89,6 +89,7 @@ local state = {
 	PickupEssence = true,
 	AutoHarvest = false,
 	AutoPlant = false,
+	AutoPlantItem = "Bloodfruit",
 	AutoDrop = false,
 	AutoDropDelay = 100,
 	AutoRun = false,
@@ -161,6 +162,7 @@ local selections = {
 }
 
 local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Blood Fruit" }
+local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
 local oreFallbackColors = {
 	Iron = Color3.fromRGB(185, 135, 85),
@@ -318,7 +320,7 @@ local autoHeal = {
 	AuraRedraws = {},
 	ItemIDs = nil,
 	Toolbar = nil,
-	BloodfruitSeedID = nil,
+	PlantItemIDs = {},
 	DropTimer = 0,
 	DropIndex = 1,
 	DropPacket = nil,
@@ -1693,7 +1695,7 @@ function loadAutoHealModules()
 end
 
 function loadFarmModules()
-	if autoHeal.ItemIDs and autoHeal.Toolbar and autoHeal.BloodfruitSeedID then
+	if autoHeal.ItemIDs and autoHeal.Toolbar then
 		return loadAutoHealModules()
 	end
 	if not loadAutoHealModules() then
@@ -1710,15 +1712,15 @@ function loadFarmModules()
 	autoHeal.ItemIDs = itemIds
 	autoHeal.Toolbar = toolbar
 	for key, value in pairs(itemIds) do
-		if key == "Bloodfruit" or key == "Blood Fruit" then
-			autoHeal.BloodfruitSeedID = value
-			break
-		elseif value == "Bloodfruit" or value == "Blood Fruit" then
-			autoHeal.BloodfruitSeedID = key
-			break
+		for _, name in ipairs(plantableNames) do
+			if key == name then
+				autoHeal.PlantItemIDs[name] = value
+			elseif value == name then
+				autoHeal.PlantItemIDs[name] = key
+			end
 		end
 	end
-	return autoHeal.BloodfruitSeedID ~= nil
+	return true
 end
 
 function findBloodfruit()
@@ -2060,9 +2062,12 @@ function updateAutoDrop(dt)
 	end
 end
 
-function isBloodfruitSelected()
+function selectedPlantItemID()
 	local selected = autoHeal.Toolbar and autoHeal.Toolbar.selectedFood
-	return selected == "Bloodfruit" or selected == "Blood Fruit"
+	if selected == state.AutoPlantItem or (selected == "Bloodfruit" and state.AutoPlantItem == "Blood Fruit") or (selected == "Blood Fruit" and state.AutoPlantItem == "Bloodfruit") then
+		return autoHeal.PlantItemIDs[state.AutoPlantItem] or autoHeal.PlantItemIDs[selected]
+	end
+	return nil
 end
 
 function updateAutoFarm(dt)
@@ -2093,7 +2098,11 @@ function updateAutoFarm(dt)
 		end
 	end
 
-	if state.AutoPlant and isBloodfruitSelected() and autoHeal.Packets.InteractStructure then
+	if state.AutoPlant and autoHeal.Packets.InteractStructure then
+		local plantItemID = selectedPlantItemID()
+		if not plantItemID then
+			return
+		end
 		local deployables = workspace:FindFirstChild("Deployables")
 		if not deployables then
 			return
@@ -2101,10 +2110,10 @@ function updateAutoFarm(dt)
 		for _, obj in ipairs(deployables:GetChildren()) do
 			if obj.Name == "Plant Box" and obj:IsA("Model") and not obj:FindFirstChild("Seed") then
 				local entityID = obj:GetAttribute("EntityID")
-				if entityID and (root.Position - obj:GetPivot().Position).Magnitude <= 8 then
+				if entityID and (root.Position - obj:GetPivot().Position).Magnitude <= 25 then
 					pcall(autoHeal.Packets.InteractStructure.send, {
 						entityID = entityID,
-						itemID = autoHeal.BloodfruitSeedID,
+						itemID = plantItemID,
 					})
 				end
 			end
@@ -2596,6 +2605,9 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 end
 
 function createChoiceDropdown(parent, label, choices, getValue, setValue)
+	local function currentChoices()
+		return type(choices) == "function" and choices() or choices
+	end
 	local box = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 34),
 		BackgroundTransparency = 1,
@@ -2618,7 +2630,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 	}, headerButton)
 
 	local overlay = make("Frame", {
-		Size = UDim2.new(0, 250, 0, (#choices * 30) + 12),
+		Size = UDim2.new(0, 250, 0, 220),
 		BackgroundColor3 = Color3.fromRGB(8, 8, 10),
 		BorderSizePixel = 0,
 		Visible = false,
@@ -2638,6 +2650,38 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 
 	local expanded = false
 	local rows = {}
+
+	local function rebuildRows()
+		for _, row in pairs(rows) do
+			row:Destroy()
+		end
+		rows = {}
+		for index, choice in ipairs(currentChoices()) do
+			local row = make("TextButton", {
+				Name = choice,
+				Size = UDim2.new(1, 0, 0, 26),
+				BackgroundColor3 = Color3.fromRGB(20, 20, 23),
+				BorderSizePixel = 0,
+				AutoButtonColor = false,
+				Font = Enum.Font.Gotham,
+				Text = choice,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 82,
+				LayoutOrder = index,
+			}, overlay)
+			corner(row, 6)
+			make("UIPadding", {
+				PaddingLeft = UDim.new(0, 8),
+				PaddingRight = UDim.new(0, 8),
+			}, row)
+			rows[choice] = row
+			connect(row.MouseButton1Click, function()
+				setValue(choice)
+				closeDropdown()
+			end)
+		end
+	end
 
 	local function redraw()
 		headerButton.Text = label .. ": " .. tostring(getValue()) .. (expanded and " -" or " +")
@@ -2660,47 +2704,23 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 	end
 	table.insert(dropdownClosers, closeDropdown)
 
-	for index, choice in ipairs(choices) do
-		local row = make("TextButton", {
-			Name = choice,
-			Size = UDim2.new(1, 0, 0, 26),
-			BackgroundColor3 = Color3.fromRGB(20, 20, 23),
-			BorderSizePixel = 0,
-			AutoButtonColor = false,
-			Font = Enum.Font.Gotham,
-			Text = choice,
-			TextSize = 12,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = 82,
-			LayoutOrder = index,
-		}, overlay)
-		corner(row, 6)
-		make("UIPadding", {
-			PaddingLeft = UDim.new(0, 8),
-			PaddingRight = UDim.new(0, 8),
-		}, row)
-		rows[choice] = row
-		connect(row.MouseButton1Click, function()
-			setValue(choice)
-			closeDropdown()
-		end)
-	end
-
 	connect(headerButton.MouseButton1Click, function()
 		local shouldOpen = not expanded
 		closeDropdowns()
 		expanded = shouldOpen
 		overlay.Visible = expanded
 		if expanded then
+			rebuildRows()
 			openDropdowns += 1
 			dropdownBlocker.Visible = true
 			syncPageScrolling()
 			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
-			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, (#choices * 30) + 12)
+			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, math.min(#currentChoices() * 30 + 12, 220))
 		end
 		redraw()
 	end)
 
+	rebuildRows()
 	redraw()
 	return redraw
 end
@@ -4142,6 +4162,34 @@ function collectFoodNames()
 	return foodTypeNames
 end
 
+function collectPlantNames()
+	local names = {}
+	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
+		for _, item in pairs(autoHeal.GameUtil.Data.inventory) do
+			if item and item.name and item.quantity and item.quantity > 0 then
+				for _, plantName in ipairs(plantableNames) do
+					if item.name == plantName then
+						names[item.name] = true
+					end
+				end
+			end
+		end
+	end
+	local sorted = sortedKeys(names)
+	if #sorted > 0 then
+		local foundSelected = false
+		for _, name in ipairs(sorted) do
+			if name == state.AutoPlantItem then
+				foundSelected = true
+			end
+		end
+		if not foundSelected then
+			state.AutoPlantItem = names.Bloodfruit and "Bloodfruit" or names["Blood Fruit"] and "Blood Fruit" or sorted[1]
+		end
+	end
+	return sorted
+end
+
 function collectInventoryNames()
 	local names = {}
 	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
@@ -4271,6 +4319,11 @@ createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant 
 	if v then
 		notify("Auto Plant", "Equip your Hoe ya Hoe")
 	end
+end)
+createChoiceDropdown(sections.AutoFarm, "Plant Item", collectPlantNames, function()
+	return state.AutoPlantItem
+end, function(value)
+	state.AutoPlantItem = value
 end)
 
 sections.PlayerEsp = section(visualPage, "Player ESP")
