@@ -318,6 +318,8 @@ local autoHeal = {
 	FarmTimer = 0,
 	AuraTimer = 0,
 	AuraRedraws = {},
+	WorldRainbowTimer = 0,
+	NoclipTimer = 0,
 	ItemIDs = nil,
 	Toolbar = nil,
 	PlantItemIDs = {},
@@ -1947,17 +1949,18 @@ function pickupClosestItem(essenceOnly)
 	if not currentCharacter or not hum or hum.Health <= 0 or not root or not itemsFolder then
 		return
 	end
-	local closestPart, closestDist = nil, math.huge
+	local closestPart, closestDistSq = nil, 625
 	for _, part in ipairs(itemsFolder:GetChildren()) do
 		if part:IsA("BasePart") and part:GetAttribute("EntityID") and (not essenceOnly or part.Name:find("Essence")) then
-			local dist = (root.Position - part.Position).Magnitude
-			if dist < closestDist then
-				closestDist = dist
+			local offset = root.Position - part.Position
+			local distSq = offset:Dot(offset)
+			if distSq < closestDistSq then
+				closestDistSq = distSq
 				closestPart = part
 			end
 		end
 	end
-	if closestPart and closestDist <= 25 and autoHeal.PickupModule.Try(closestPart) then
+	if closestPart and autoHeal.PickupModule.Try(closestPart) then
 		local entityID = closestPart:GetAttribute("EntityID")
 		if autoHeal.PickupSound then
 			autoHeal.PickupSound:Play()
@@ -1974,7 +1977,7 @@ function updateAutoPickup(dt)
 		return
 	end
 	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < 0.05 then
+	if autoHeal.PickupTimer < 0.08 then
 		return
 	end
 	autoHeal.PickupTimer = 0
@@ -2025,14 +2028,24 @@ function updateAutoDrop(dt)
 		end
 		return
 	end
+	if not loadAutoHealModules() then
+		return
+	end
+	local slots = {}
+	local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
+	for slot, item in pairs(inventory or {}) do
+		if item and item.name and selections.AutoDrop[item.name] and (tonumber(item.quantity) or 0) > 0 then
+			slots[item.name] = slot
+		end
+	end
 	local names = {}
 	for _, name in ipairs(autoHeal.DropOrder) do
-		if selections.AutoDrop[name] and inventorySlotForName(name) then
+		if slots[name] then
 			table.insert(names, name)
 		end
 	end
 	for name, selected in pairs(selections.AutoDrop) do
-		if selected and inventorySlotForName(name) then
+		if selected and slots[name] then
 			local found = false
 			for _, existingName in ipairs(names) do
 				found = found or existingName == name
@@ -2053,7 +2066,7 @@ function updateAutoDrop(dt)
 		autoHeal.DropIndex = 1
 	end
 	local itemName = names[autoHeal.DropIndex]
-	local slot = inventorySlotForName(itemName)
+	local slot = slots[itemName]
 	autoHeal.DropIndex = autoHeal.DropIndex % #names + 1
 	if slot then
 		pcall(function()
@@ -2075,7 +2088,7 @@ function updateAutoFarm(dt)
 		return
 	end
 	autoHeal.FarmTimer += dt
-	if autoHeal.FarmTimer < 0.04 then
+	if autoHeal.FarmTimer < 0.12 then
 		return
 	end
 	autoHeal.FarmTimer = 0
@@ -2091,7 +2104,8 @@ function updateAutoFarm(dt)
 		for _, obj in ipairs(workspace:GetChildren()) do
 			if obj.Name == "Bloodfruit Bush" and obj:IsA("Model") then
 				local entityID = obj:GetAttribute("EntityID")
-				if entityID and (root.Position - obj:GetPivot().Position).Magnitude <= 25 then
+				local offset = root.Position - obj:GetPivot().Position
+				if entityID and offset:Dot(offset) <= 625 then
 					pcall(autoHeal.Packets.Pickup.send, entityID)
 				end
 			end
@@ -2110,7 +2124,8 @@ function updateAutoFarm(dt)
 		for _, obj in ipairs(deployables:GetChildren()) do
 			if obj.Name == "Plant Box" and obj:IsA("Model") and not obj:FindFirstChild("Seed") then
 				local entityID = obj:GetAttribute("EntityID")
-				if entityID and (root.Position - obj:GetPivot().Position).Magnitude <= 25 then
+				local offset = root.Position - obj:GetPivot().Position
+				if entityID and offset:Dot(offset) <= 625 then
 					pcall(autoHeal.Packets.InteractStructure.send, {
 						entityID = entityID,
 						itemID = plantItemID,
@@ -2150,9 +2165,10 @@ function addAuraTarget(list, model, rootPosition)
 		return
 	end
 	local position = model:GetPivot().Position
-	local distance = (rootPosition - position).Magnitude
-	if distance <= 25 then
-		table.insert(list, { EntityID = entityID, Position = position, Distance = distance })
+	local offset = rootPosition - position
+	local distanceSq = offset:Dot(offset)
+	if distanceSq <= 625 then
+		table.insert(list, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
 	end
 end
 
@@ -2188,15 +2204,18 @@ function collectAuraTargets(rootPosition)
 		for _, model in ipairs({ workspace:FindFirstChild("Treasure Chest"), workspace:FindFirstChild("TreasureChest") }) do
 			addAuraTarget(targets, model, rootPosition)
 		end
+		local moundsFolder = workspace:FindFirstChild("Mounds")
+		if moundsFolder then
+			for _, model in ipairs(moundsFolder:GetChildren()) do
+				addAuraTarget(targets, model, rootPosition)
+			end
+		end
 		for _, model in ipairs(workspace:GetChildren()) do
 			if isMeteorCore(model) then
 				addAuraTarget(targets, model, rootPosition)
 			end
 		end
 	end
-	table.sort(targets, function(a, b)
-		return a.Distance < b.Distance
-	end)
 	return targets
 end
 
@@ -2205,7 +2224,7 @@ function updateAuras(dt)
 		return
 	end
 	autoHeal.AuraTimer += dt
-	if autoHeal.AuraTimer < 0.25 then
+	if autoHeal.AuraTimer < 0.2 then
 		return
 	end
 	autoHeal.AuraTimer = 0
@@ -2221,15 +2240,25 @@ function updateAuras(dt)
 		return
 	end
 	local closest = targets[1]
+	for _, target in ipairs(targets) do
+		if target.DistanceSq < closest.DistanceSq then
+			closest = target
+		end
+	end
 	local direction = closest.Position - root.Position
 	if direction.Magnitude <= 0 then
 		return
 	end
 	local flat = Vector3.new(direction.X, 0, direction.Z)
 	local spoofedCFrame = flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
-	local entityList = {}
+	local entityList = { { entityID = closest.EntityID, buffer = nil } }
 	for _, target in ipairs(targets) do
-		table.insert(entityList, { entityID = target.EntityID, buffer = nil })
+		if target ~= closest then
+			table.insert(entityList, { entityID = target.EntityID, buffer = nil })
+			if #entityList >= 3 then
+				break
+			end
+		end
 	end
 	pcall(function()
 		autoHeal.Packets.SwingTool.send({
@@ -2918,15 +2947,18 @@ function setFreecam(enabled)
 			freecam.Original.JumpPower = hum.JumpPower
 			freecam.Original.JumpHeight = hum.JumpHeight
 			freecam.Original.AutoRotate = hum.AutoRotate
+			hum.AutoRotate = false
 			if not state.AutoRun then
 				hum.WalkSpeed = 0
 				hum.JumpPower = 0
 				hum.JumpHeight = 0
-				hum.AutoRotate = false
 			end
 		end
 		if root then
 			freecam.Original.RootAnchored = root.Anchored
+			local forward = root.CFrame.LookVector
+			local flatForward = Vector3.new(forward.X, 0, forward.Z)
+			freecam.AutoRunDirection = flatForward.Magnitude > 0 and flatForward.Unit or Vector3.new(0, 0, -1)
 			if not state.AutoRun then
 				root.Anchored = true
 				root.AssemblyLinearVelocity = Vector3.zero
@@ -2969,6 +3001,7 @@ function setFreecam(enabled)
 		if freecamReturnTracer then
 			freecamReturnTracer.Visible = false
 		end
+		freecam.AutoRunDirection = nil
 		table.clear(freecam.Original)
 	end
 end
@@ -3012,7 +3045,7 @@ function updateFreecam(dt)
 		hum.AutoRotate = false
 	elseif hum then
 		hum.WalkSpeed = state.WalkSpeedEnabled and state.WalkSpeed or defaults.WalkSpeed
-		hum.AutoRotate = true
+		hum.AutoRotate = false
 	end
 	if root and not state.AutoRun then
 		root.Anchored = true
@@ -3095,10 +3128,16 @@ function restoreNoclip()
 	noclipTerrainGroup = nil
 end
 
-function updateNoclip()
+function updateNoclip(dt)
 	if not state.Noclip then
+		autoHeal.NoclipTimer = 0
 		return
 	end
+	autoHeal.NoclipTimer += dt
+	if autoHeal.NoclipTimer < 0.15 then
+		return
+	end
+	autoHeal.NoclipTimer = 0
 
 	local currentCharacter, hum, root = getCharacterParts()
 	if not currentCharacter or not root then
@@ -3138,7 +3177,7 @@ function updateAutoRun()
 		return
 	end
 
-	local forward = camera.CFrame.LookVector
+	local forward = state.Freecam and freecam.AutoRunDirection or camera.CFrame.LookVector
 	local flatForward = Vector3.new(forward.X, 0, forward.Z)
 	if flatForward.Magnitude > 0 then
 		hum:Move(flatForward.Unit, false)
@@ -3169,9 +3208,11 @@ function createBillboard(name, color, size, hasSubText)
 	local textColor = readableEspColor(color)
 	local billboard = make("BillboardGui", {
 		Name = "ControlPanelEspBillboard",
-		Size = hasSubText and UDim2.new(0, 190, 0, 54) or UDim2.new(0, 180, 0, 42),
+		Size = hasSubText and UDim2.fromOffset(190, 54) or UDim2.fromOffset(180, 42),
 		StudsOffset = Vector3.new(0, 3, 0),
 		AlwaysOnTop = true,
+		LightInfluence = 0,
+		MaxDistance = 100000,
 		Enabled = true,
 	}, nil)
 
@@ -3865,9 +3906,9 @@ function ensureWorldEsp(instance, ruleName)
 
 	obj.Billboard.Adornee = adornee
 	obj.Billboard.StudsOffset = ruleName == "Dropped" and Vector3.new(0, 1.25, 0) or Vector3.new(0, 3, 0)
-	obj.Billboard.Size = ruleName == "Dropped" and UDim2.new(0, 132, 0, 30)
-		or ruleName == "God" and UDim2.new(0, 190, 0, 54)
-		or UDim2.new(0, 180, 0, 42)
+	obj.Billboard.Size = ruleName == "Dropped" and UDim2.fromOffset(132, 30)
+		or ruleName == "God" and UDim2.fromOffset(190, 54)
+		or UDim2.fromOffset(180, 42)
 	obj.Highlight.Adornee = instance:IsA("Model") and instance or adornee
 	obj.Billboard.Enabled = state.WorldNames
 	obj.Highlight.Enabled = state.WorldChams
@@ -4702,7 +4743,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	enforceMovementOverrides()
 	updateFreecam(dt)
 	updateFly()
-	updateNoclip()
+	updateNoclip(dt)
 	updateAutoRun()
 	updateAutoHeal(dt)
 	updateAutoHunger(dt)
@@ -4758,18 +4799,22 @@ connect(S.RunService.RenderStepped, function(dt)
 	end
 	worldTracersLast = state.WorldTracers
 
-	for _, obj in pairs(esp.World) do
-		if obj.RuleName == "Event" and obj.Instance and obj.Instance.Parent and isRainbowEvent(obj.Instance) then
-			local color = rainbowColor(0.12)
-			if obj.Text then
-				obj.Text.TextColor3 = color
-			end
-			if obj.Highlight then
-				obj.Highlight.FillColor = color
-				obj.Highlight.OutlineColor = color
-			end
-			if obj.Tracer then
-				obj.Tracer.BackgroundColor3 = color
+	autoHeal.WorldRainbowTimer += dt
+	if autoHeal.WorldRainbowTimer >= 0.05 then
+		autoHeal.WorldRainbowTimer = 0
+		for _, obj in pairs(esp.World) do
+			if obj.RuleName == "Event" and obj.Instance and obj.Instance.Parent and isRainbowEvent(obj.Instance) then
+				local color = rainbowColor(0.12)
+				if obj.Text then
+					obj.Text.TextColor3 = color
+				end
+				if obj.Highlight then
+					obj.Highlight.FillColor = color
+					obj.Highlight.OutlineColor = color
+				end
+				if obj.Tracer then
+					obj.Tracer.BackgroundColor3 = color
+				end
 			end
 		end
 	end
