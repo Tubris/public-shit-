@@ -99,7 +99,7 @@ local state = {
 	PlayerChams = true,
 	PlayerDistance = true,
 	PlayerTracers = false,
-	PlayerTools = false,
+	PlayerTools = true,
 	PlayerZayMode = false,
 	PlayerTextSize = 12,
 	PlayerFov = 100,
@@ -1917,7 +1917,7 @@ function updateAutoPickup(dt)
 		return
 	end
 	autoHeal.PickupTimer = 0
-	pickupClosestItem(state.PickupEssence)
+	pickupClosestItem(state.PickupEssence and not state.AutoPickup)
 end
 
 function getDropPacket()
