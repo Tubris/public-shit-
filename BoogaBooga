@@ -317,6 +317,8 @@ local autoHeal = {
 	PickupTimer = 0,
 	FarmTimer = 0,
 	AuraTimer = 0,
+	AuraScanTimer = 0,
+	AuraCandidates = {},
 	AuraRedraws = {},
 	WorldRainbowTimer = 0,
 	NoclipTimer = 0,
@@ -2156,30 +2158,53 @@ function isMineAuraResource(resource)
 		or string.find(name, "lode", 1, true)
 end
 
-function addAuraTarget(list, model, rootPosition)
-	if not model or not model:IsA("Model") then
+function auraEntityID(instance)
+	if not instance then
+		return nil
+	end
+	local entityID = instance:GetAttribute("EntityID")
+	if entityID then
+		return entityID
+	end
+	local adornee = getAdornee(instance)
+	entityID = adornee and adornee:GetAttribute("EntityID")
+	if entityID then
+		return entityID
+	end
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		entityID = descendant:GetAttribute("EntityID")
+		if entityID then
+			return entityID
+		end
+	end
+	local parent = instance.Parent
+	while parent and parent ~= workspace do
+		entityID = parent:GetAttribute("EntityID")
+		if entityID then
+			return entityID
+		end
+		parent = parent.Parent
+	end
+	return nil
+end
+
+function addAuraCandidate(list, model)
+	if not model or (not model:IsA("Model") and not model:IsA("BasePart")) then
 		return
 	end
-	local entityID = model:GetAttribute("EntityID")
-	if not entityID then
-		return
-	end
-	local position = model:GetPivot().Position
-	local offset = rootPosition - position
-	local distanceSq = offset:Dot(offset)
-	if distanceSq <= 625 then
-		table.insert(list, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
+	if auraEntityID(model) then
+		table.insert(list, model)
 	end
 end
 
-function collectAuraTargets(rootPosition)
-	local targets = {}
+function refreshAuraCandidates()
+	local candidates = {}
 	if state.WeaponAura then
 		local playersFolder = workspace:FindFirstChild("Players")
 		if playersFolder then
 			for _, model in ipairs(playersFolder:GetChildren()) do
 				if model.Name ~= player.Name and model ~= character then
-					addAuraTarget(targets, model, rootPosition)
+					addAuraCandidate(candidates, model)
 				end
 			end
 		end
@@ -2188,7 +2213,7 @@ function collectAuraTargets(rootPosition)
 		local crittersFolder = workspace:FindFirstChild("Critters")
 		if crittersFolder then
 			for _, model in ipairs(crittersFolder:GetChildren()) do
-				addAuraTarget(targets, model, rootPosition)
+				addAuraCandidate(candidates, model)
 			end
 		end
 	end
@@ -2197,34 +2222,70 @@ function collectAuraTargets(rootPosition)
 		if resourcesFolder then
 			for _, model in ipairs(resourcesFolder:GetChildren()) do
 				if isMineAuraResource(model) then
-					addAuraTarget(targets, model, rootPosition)
+					addAuraCandidate(candidates, model)
 				end
 			end
 		end
-		for _, model in ipairs({ workspace:FindFirstChild("Treasure Chest"), workspace:FindFirstChild("TreasureChest") }) do
-			addAuraTarget(targets, model, rootPosition)
-		end
+		addAuraCandidate(candidates, workspace:FindFirstChild("Treasure Chest"))
+		addAuraCandidate(candidates, workspace:FindFirstChild("TreasureChest"))
 		local moundsFolder = workspace:FindFirstChild("Mounds")
 		if moundsFolder then
 			for _, model in ipairs(moundsFolder:GetChildren()) do
-				addAuraTarget(targets, model, rootPosition)
+				addAuraCandidate(candidates, model)
 			end
 		end
 		for _, model in ipairs(workspace:GetChildren()) do
 			if isMeteorCore(model) then
-				addAuraTarget(targets, model, rootPosition)
+				addAuraCandidate(candidates, model)
 			end
 		end
 	end
-	return targets
+	autoHeal.AuraCandidates = candidates
+end
+
+function considerAuraTarget(best, model, rootPosition)
+	if not model or not model.Parent then
+		return best
+	end
+	local entityID = auraEntityID(model)
+	if not entityID then
+		return best
+	end
+	local adornee = getAdornee(model)
+	if not adornee then
+		return best
+	end
+	local position = adornee.Position
+	local offset = rootPosition - position
+	local distanceSq = offset:Dot(offset)
+	if distanceSq <= 625 and (not best or distanceSq < best.DistanceSq) then
+		return { EntityID = entityID, Position = position, DistanceSq = distanceSq }
+	end
+	return best
+end
+
+function closestAuraTarget(rootPosition)
+	local best
+	for _, model in ipairs(autoHeal.AuraCandidates) do
+		best = considerAuraTarget(best, model, rootPosition)
+	end
+	return best
 end
 
 function updateAuras(dt)
 	if not state.WeaponAura and not state.MineAura and not state.MobAura then
+		if #autoHeal.AuraCandidates > 0 then
+			table.clear(autoHeal.AuraCandidates)
+		end
 		return
 	end
+	autoHeal.AuraScanTimer += dt
+	if autoHeal.AuraScanTimer >= 1 or #autoHeal.AuraCandidates == 0 then
+		autoHeal.AuraScanTimer = 0
+		refreshAuraCandidates()
+	end
 	autoHeal.AuraTimer += dt
-	if autoHeal.AuraTimer < 0.2 then
+	if autoHeal.AuraTimer < 0.1 then
 		return
 	end
 	autoHeal.AuraTimer = 0
@@ -2235,15 +2296,9 @@ function updateAuras(dt)
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
 	end
-	local targets = collectAuraTargets(root.Position)
-	if #targets == 0 then
+	local closest = closestAuraTarget(root.Position)
+	if not closest then
 		return
-	end
-	local closest = targets[1]
-	for _, target in ipairs(targets) do
-		if target.DistanceSq < closest.DistanceSq then
-			closest = target
-		end
 	end
 	local direction = closest.Position - root.Position
 	if direction.Magnitude <= 0 then
@@ -2252,14 +2307,6 @@ function updateAuras(dt)
 	local flat = Vector3.new(direction.X, 0, direction.Z)
 	local spoofedCFrame = flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
 	local entityList = { { entityID = closest.EntityID, buffer = nil } }
-	for _, target in ipairs(targets) do
-		if target ~= closest then
-			table.insert(entityList, { entityID = target.EntityID, buffer = nil })
-			if #entityList >= 3 then
-				break
-			end
-		end
-	end
 	pcall(function()
 		autoHeal.Packets.SwingTool.send({
 			entityIDs = entityList,
@@ -2277,6 +2324,8 @@ end
 
 function setAura(stateKey, value, label)
 	state[stateKey] = value
+	autoHeal.AuraScanTimer = 1
+	table.clear(autoHeal.AuraCandidates)
 	notify(label, (value and "On - " or "Off - ") .. auraMessage(label))
 end
 
@@ -2285,6 +2334,8 @@ function setAllAurasFromKey()
 	state.WeaponAura = turnOn
 	state.MineAura = turnOn
 	state.MobAura = turnOn
+	autoHeal.AuraScanTimer = 1
+	table.clear(autoHeal.AuraCandidates)
 	for _, redraw in pairs(autoHeal.AuraRedraws) do
 		redraw()
 	end
