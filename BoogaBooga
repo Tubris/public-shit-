@@ -85,7 +85,7 @@ local state = {
 	AutoHunger = true,
 	AutoHungerLevel = 80,
 	AutoPickup = false,
-	PickupEssence = false,
+	PickupEssence = true,
 	AutoDrop = false,
 	AutoDropDelay = 10,
 	AutoRun = false,
@@ -211,8 +211,17 @@ local worldRules = {
 	God = {
 		tags = {},
 		folders = {},
-		keywords = { "god" },
 		color = Color3.fromRGB(255, 255, 255),
+		colors = {
+			["Sleeping God"] = Color3.fromRGB(150, 150, 150),
+			["Furious God"] = Color3.fromRGB(255, 70, 70),
+			["Lonely God"] = Color3.fromRGB(150, 150, 150),
+			["Miserable God"] = Color3.fromRGB(150, 235, 255),
+			["Old God"] = Color3.fromRGB(255, 255, 255),
+			["Wealthy God"] = Color3.fromRGB(90, 235, 120),
+			["Ancient God"] = Color3.fromRGB(255, 175, 55),
+			["Hateful God"] = Color3.fromRGB(255, 70, 70),
+		},
 	},
 	Portal = {
 		tags = {},
@@ -3230,6 +3239,16 @@ function getGodRoot()
 	return resources and resources:FindFirstChild("Ancient God")
 end
 
+function getAncientTreeRoot()
+	local resources = workspace:FindFirstChild("Resources")
+	return resources and resources:FindFirstChild("Ancient Tree")
+end
+
+function isAncientTreeInstance(instance)
+	local tree = getAncientTreeRoot()
+	return tree and instance == tree and getAdornee(instance) ~= nil
+end
+
 function isGodBag(instance)
 	local current = instance
 	while current and current ~= workspace do
@@ -3245,24 +3264,17 @@ function isGodInstance(instance)
 	if isGodBag(instance) then
 		return false
 	end
-	local hasGodName = string.find(string.lower(instance.Name), "god", 1, true) ~= nil
-	return hasGodName and getAdornee(instance) ~= nil
+	if isAncientTreeInstance(instance) then
+		return true
+	end
+	return worldRules.God.colors[instance.Name] ~= nil and getAdornee(instance) ~= nil
 end
 
 function getGodColor(instance)
-	local eyes = instance:FindFirstChild("Eyes", true)
-	if eyes and eyes:IsA("BasePart") then
-		return eyes.Color
+	if isAncientTreeInstance(instance) then
+		return Color3.fromRGB(255, 220, 70)
 	end
-	local parent = instance.Parent
-	while parent and parent ~= workspace do
-		eyes = parent:FindFirstChild("Eyes", true)
-		if eyes and eyes:IsA("BasePart") then
-			return eyes.Color
-		end
-		parent = parent.Parent
-	end
-	return worldRules.God.color
+	return worldRules.God.colors[instance.Name] or worldRules.God.color
 end
 
 function getGodHealth(instance)
@@ -3387,6 +3399,7 @@ function canBeWorldCandidate(instance)
 		or isTreasureChest(instance)
 		or isMeteorCore(instance)
 		or isWanderingTrader(instance)
+		or isAncientTreeInstance(instance)
 		or isGodInstance(instance)
 		or isPortalInstance(instance)
 		or isAntHillInstance(instance)
