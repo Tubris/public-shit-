@@ -1979,7 +1979,7 @@ function updateAutoPickup(dt)
 		return
 	end
 	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < 0.08 then
+	if autoHeal.PickupTimer < 0.00000000001 then
 		return
 	end
 	autoHeal.PickupTimer = 0
