@@ -87,6 +87,7 @@ local state = {
 	AutoHungerLevel = 80,
 	AutoPickup = false,
 	PickupEssence = true,
+	ChestPlace = false,
 	AutoHarvest = false,
 	AutoPlant = false,
 	AutoPlantItem = "Bloodfruit",
@@ -238,6 +239,7 @@ local worldRules = {
 			["Wealthy God"] = Color3.fromRGB(90, 235, 120),
 			["Ancient God"] = Color3.fromRGB(255, 175, 55),
 			["Hateful God"] = Color3.fromRGB(255, 70, 70),
+			["Crystal Guardian"] = Color3.fromRGB(150, 235, 255),
 		},
 	},
 	Portal = {
@@ -306,6 +308,9 @@ local autoHeal = {
 	HealNotified = false,
 	ExpectedHealth = nil,
 	ExpectedHealthUntil = 0,
+	LastActualHealth = nil,
+	LastHealDrop = nil,
+	LastHealNotify = 0,
 	HungerPendingFood = nil,
 	HungerPendingValue = nil,
 	HungerPendingSlot = nil,
@@ -335,6 +340,8 @@ local autoHeal = {
 	DropPacket = nil,
 	DropOrder = {},
 	GodCounters = {},
+	ChestPreview = nil,
+	ChestLastPlace = 0,
 	LastNoDropNotify = 0,
 	DanceTrack = nil,
 	ThemeRgbTimer = 0,
@@ -1256,6 +1263,15 @@ function isTypingInTextBox()
 	return S.UserInputService:GetFocusedTextBox() ~= nil
 end
 
+function isPointInsideGui(frame, point)
+	if not frame or not frame.Visible then
+		return false
+	end
+	local pos = frame.AbsolutePosition
+	local size = frame.AbsoluteSize
+	return point.X >= pos.X and point.X <= pos.X + size.X and point.Y >= pos.Y and point.Y <= pos.Y + size.Y
+end
+
 function createKeybind(parent, label, stateKey)
 	local row = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 34),
@@ -1790,10 +1806,11 @@ function updateAutoHeal(dt)
 	if not state.AutoHeal then
 		autoHeal.HealNotified = false
 		autoHeal.ExpectedHealth = nil
+		autoHeal.LastHealDrop = nil
 		return
 	end
 	autoHeal.Timer += dt
-	if autoHeal.Timer < 0.001 or os.clock() - autoHeal.LastUse < 0.001 then
+	if autoHeal.Timer < 0.001 or os.clock() - autoHeal.LastUse < 0.002 then
 		return
 	end
 	autoHeal.Timer = 0
@@ -1801,19 +1818,29 @@ function updateAutoHeal(dt)
 	if not health then
 		return
 	end
-	if autoHeal.ExpectedHealth and os.clock() < autoHeal.ExpectedHealthUntil then
+	local now = os.clock()
+	local actualHealth = health
+	if autoHeal.LastActualHealth and actualHealth < autoHeal.LastActualHealth - 0.5 then
+		autoHeal.ExpectedHealth = nil
+		autoHeal.LastHealDrop = actualHealth
+		autoHeal.HealNotified = false
+	end
+	autoHeal.LastActualHealth = actualHealth
+	if autoHeal.ExpectedHealth and now < autoHeal.ExpectedHealthUntil then
 		health = math.max(health, autoHeal.ExpectedHealth)
 	elseif autoHeal.ExpectedHealth then
 		autoHeal.ExpectedHealth = nil
 	end
 	if health > state.AutoHealHealth then
 		autoHeal.HealNotified = false
+		autoHeal.LastHealDrop = nil
 		return
 	end
 	local slot, _, quantity = findBloodfruit()
 	local usedItem = "Blood Fruit"
 	if slot and quantity > 0 then
-		local amount = math.min(quantity, math.ceil((state.AutoHealHealth - health) / 3))
+		local targetHealth = math.min(state.AutoHealHealth, getLocalMaxHealth() or state.AutoHealHealth)
+		local amount = math.min(quantity, math.max(1, math.ceil((targetHealth - actualHealth) / 3)))
 		if amount <= 0 then
 			return
 		end
@@ -1822,12 +1849,13 @@ function updateAutoHeal(dt)
 				autoHeal.Packets.UseBagItem.send(slot)
 			end)
 		end
-		autoHeal.LastUse = os.clock()
-		autoHeal.ExpectedHealth = health + amount * 3
-		autoHeal.ExpectedHealthUntil = os.clock() + 0.08
+		autoHeal.LastUse = now
+		autoHeal.ExpectedHealth = math.min(getLocalMaxHealth() or 100, actualHealth + amount * 3)
+		autoHeal.ExpectedHealthUntil = now + 1.75
 		if not autoHeal.HealNotified then
-			notify("Auto Heal", string.format("Ate %d Blood Fruit at %d HP.", amount, math.floor(health + 0.5)))
+			notify("Auto Heal", string.format("Dropped to %d HP. Healed with %d Blood Fruit.", math.floor((autoHeal.LastHealDrop or actualHealth) + 0.5), amount))
 			autoHeal.HealNotified = true
+			autoHeal.LastHealNotify = now
 		end
 		return
 	end
@@ -1856,12 +1884,99 @@ function updateAutoHeal(dt)
 		autoHeal.Packets.UseBagItem.send(slot)
 	end)
 	if ok then
-		autoHeal.LastUse = os.clock()
+		autoHeal.LastUse = now
 		if not autoHeal.HealNotified then
-			notify("Auto Heal", string.format("Ate %s at %d HP.", usedItem, math.floor(health + 0.5)))
+			notify("Auto Heal", string.format("Dropped to %d HP. Used fallback: %s.", math.floor((autoHeal.LastHealDrop or actualHealth) + 0.5), usedItem))
 			autoHeal.HealNotified = true
+			autoHeal.LastHealNotify = now
 		end
 	end
+end
+
+function getChestPlaceCFrame()
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root or not workspace.CurrentCamera then
+		return nil
+	end
+	local look = workspace.CurrentCamera.CFrame.LookVector
+	local horizontal = Vector3.new(look.X, 0, look.Z)
+	if horizontal.Magnitude < 0.05 then
+		horizontal = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	end
+	horizontal = horizontal.Unit
+	return CFrame.new(Vector3.new(root.Position.X + horizontal.X * 8, root.Position.Y - 3, root.Position.Z + horizontal.Z * 8))
+end
+
+function destroyChestPreview()
+	if autoHeal.ChestPreview then
+		pcall(function()
+			autoHeal.ChestPreview:Destroy()
+		end)
+		autoHeal.ChestPreview = nil
+	end
+end
+
+function updateChestPreview()
+	if not state.ChestPlace then
+		destroyChestPreview()
+		return
+	end
+	local cf = getChestPlaceCFrame()
+	if not cf then
+		return
+	end
+	if not autoHeal.ChestPreview then
+		local preview = Instance.new("Part")
+		preview.Name = "ChubbisonChestPreview"
+		preview.Size = Vector3.new(6, 5, 6)
+		preview.BrickColor = BrickColor.new("Bright orange")
+		preview.Material = Enum.Material.Neon
+		preview.Transparency = 0.4
+		preview.Anchored = true
+		preview.CanCollide = false
+		preview.CastShadow = false
+		local box = Instance.new("SelectionBox")
+		box.Adornee = preview
+		box.Color3 = Color3.fromRGB(255, 100, 0)
+		box.LineThickness = 0.25
+		box.Transparency = 0.15
+		box.Parent = preview
+		local lid = Instance.new("Part")
+		lid.Name = "TopPart"
+		lid.Size = Vector3.new(5.5, 0.8, 4.5)
+		lid.BrickColor = BrickColor.new("Bright orange")
+		lid.Material = Enum.Material.Neon
+		lid.Transparency = 0.4
+		lid.Anchored = true
+		lid.CanCollide = false
+		lid.CastShadow = false
+		lid.Parent = preview
+		preview.Parent = workspace
+		autoHeal.ChestPreview = preview
+	end
+	autoHeal.ChestPreview.CFrame = cf
+	local lid = autoHeal.ChestPreview:FindFirstChild("TopPart")
+	if lid then
+		lid.CFrame = cf * CFrame.new(0, 2, 0)
+	end
+end
+
+function placeChest()
+	if os.clock() - autoHeal.ChestLastPlace < 0.2 or not loadAutoHealModules() then
+		return
+	end
+	local cf = getChestPlaceCFrame()
+	if not cf or not autoHeal.Packets.PlaceStructure then
+		return
+	end
+	autoHeal.ChestLastPlace = os.clock()
+	pcall(function()
+		autoHeal.Packets.PlaceStructure.send({
+			cframe = cf,
+			buildingName = "Chest",
+		})
+	end)
 end
 
 function updateAutoHunger(dt)
@@ -4471,6 +4586,16 @@ autoHeal.AuraRedraws.Mob = createToggle(sections.Auras, "Mob Aura", function() r
 	setAura("MobAura", v, "Mob Aura")
 end)
 
+sections.Placement = section(playerPage, "Placement")
+createToggle(sections.Placement, "Chest Place", function() return state.ChestPlace end, function(v)
+	state.ChestPlace = v
+	if not v then
+		destroyChestPreview()
+	else
+		notify("Chest Place", "Preview on. Left click places a chest.")
+	end
+end)
+
 sections.Healing = section(autoPage, "Healing")
 createToggle(sections.Healing, "Auto Heal", function() return state.AutoHeal end, function(v)
 	state.AutoHeal = v
@@ -4727,6 +4852,7 @@ connect(minimize.MouseButton1Click, function()
 end)
 
 connect(close.MouseButton1Click, function()
+	destroyChestPreview()
 	screenGui:Destroy()
 end)
 
@@ -4743,6 +4869,13 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if isTypingInTextBox() then
+		return
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 and state.ChestPlace then
+		if not gameProcessed and not isPointInsideGui(main, input.Position) then
+			placeChest()
+		end
 		return
 	end
 
@@ -4910,6 +5043,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateAutoDrop(dt)
 	updateAutoFarm(dt)
 	updateAuras(dt)
+	updateChestPreview()
 	updateDance()
 	updateStats()
 	updateHealthBar()
