@@ -62,13 +62,14 @@ local state = {
 	Fullbright = false,
 	SeeRecipe = false,
 	Dance = false,
-	DanceEmote = "Irish Jig",
+	DanceEmote = "Breakdance",
 	GuiThemeHue = 267,
 	GuiThemeRgb = false,
 	ServerRegion = "NA East",
 	ToggleKey = Enum.KeyCode.Return,
 	FreecamToggleKey = Enum.KeyCode.O,
 	AutoRunKey = Enum.KeyCode.Equals,
+	AutoPickupKey = Enum.KeyCode.Q,
 	Freecam = false,
 	FreecamSpeed = 64,
 
@@ -84,6 +85,7 @@ local state = {
 	AutoHunger = true,
 	AutoHungerLevel = 80,
 	AutoPickup = false,
+	PickupEssence = false,
 	AutoDrop = false,
 	AutoDropDelay = 10,
 	AutoRun = false,
@@ -765,18 +767,17 @@ local header = make("Frame", {
 	Name = "Header",
 	Size = UDim2.new(1, 0, 0, 48),
 	BackgroundColor3 = Color3.fromRGB(8, 7, 18),
-	BackgroundTransparency = 0.03,
+	BackgroundTransparency = 0.12,
 	BorderSizePixel = 0,
 }, main)
 corner(header, 18)
-stroke(header, Color3.fromRGB(155, 105, 230), 0.58, 1)
 
 make("TextLabel", {
 	Position = UDim2.new(0, 18, 0, 0),
 	Size = UDim2.new(1, -114, 1, 0),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBold,
-	Text = "Chubbison Me",
+	Text = "Hello " .. player.DisplayName,
 	TextColor3 = Color3.fromRGB(252, 246, 255),
 	TextSize = 18,
 	TextXAlignment = Enum.TextXAlignment.Left,
@@ -813,12 +814,11 @@ corner(close, 7)
 local tabs = make("Frame", {
 	Position = UDim2.new(0, 12, 0, 58),
 	Size = UDim2.new(1, -24, 0, 34),
-	BackgroundColor3 = Color3.fromRGB(14, 11, 25),
-	BackgroundTransparency = 0.05,
+	BackgroundColor3 = Color3.fromRGB(5, 4, 15),
+	BackgroundTransparency = 0.18,
 	BorderSizePixel = 0,
 }, main)
 corner(tabs, 12)
-stroke(tabs, Color3.fromRGB(120, 80, 180), 0.78, 1)
 
 make("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
@@ -917,9 +917,9 @@ function redrawTabs()
 	for tabName, button in pairs(tabButtons) do
 		local selected = pages[tabName] and pages[tabName].Visible
 		tween(button, nil, {
-			BackgroundColor3 = selected and themeColor(0.62, 0.82) or Color3.fromRGB(20, 16, 34),
-			BackgroundTransparency = selected and 0 or 0.1,
-			TextColor3 = selected and Color3.fromRGB(255, 250, 255) or Color3.fromRGB(165, 150, 190),
+			BackgroundColor3 = selected and themeColor(0.82, 0.72) or Color3.fromRGB(18, 13, 38),
+			BackgroundTransparency = selected and 0.02 or 0.18,
+			TextColor3 = selected and Color3.fromRGB(255, 250, 255) or Color3.fromRGB(220, 205, 245),
 		})
 	end
 end
@@ -929,17 +929,17 @@ function createTab(name, order)
 	local button = make("TextButton", {
 		Name = name .. "Tab",
 		Size = UDim2.new(0.2, -3, 1, 0),
-		BackgroundColor3 = Color3.fromRGB(20, 16, 34),
-		BackgroundTransparency = 0.1,
+		BackgroundColor3 = Color3.fromRGB(12, 9, 28),
+		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
 		Font = Enum.Font.GothamBold,
 		Text = name,
-		TextColor3 = Color3.fromRGB(165, 150, 190),
+		TextColor3 = Color3.fromRGB(220, 205, 245),
 		TextSize = 12,
 		LayoutOrder = order,
 	}, tabs)
-	corner(button, 6)
+	corner(button, 8)
 	tabButtons[name] = button
 	connect(button.MouseButton1Click, function()
 		activateTab(name)
@@ -962,12 +962,9 @@ function section(parent, heading)
 	local box = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 44),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = Color3.fromRGB(15, 13, 24),
-		BackgroundTransparency = 0.05,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 	}, parent)
-	corner(box, 12)
-	stroke(box, Color3.fromRGB(92, 78, 120), 0.35, 1)
 
 	make("UIPadding", {
 		PaddingLeft = UDim.new(0, 10),
@@ -982,12 +979,12 @@ function section(parent, heading)
 	}, box)
 
 	make("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 18),
+		Size = UDim2.new(1, 0, 0, 22),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = heading,
-		TextColor3 = Color3.fromRGB(252, 246, 255),
-		TextSize = 12,
+		TextColor3 = Color3.fromRGB(255, 252, 255),
+		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, box)
 
@@ -1005,7 +1002,7 @@ function createToggle(parent, label, getValue, setValue)
 		BackgroundTransparency = 1,
 		Font = Enum.Font.Gotham,
 		Text = label,
-		TextColor3 = Color3.fromRGB(240, 232, 250),
+		TextColor3 = Color3.fromRGB(255, 248, 255),
 		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, row)
@@ -1033,12 +1030,12 @@ function createToggle(parent, label, getValue, setValue)
 	local function redraw()
 		local on = getValue()
 		tween(button, nil, {
-			BackgroundColor3 = on and themeColor(0.38, 1) or Color3.fromRGB(255, 255, 255),
-			BackgroundTransparency = on and 0.08 or 0.9,
+			BackgroundColor3 = on and themeColor(0.84, 0.78) or Color3.fromRGB(52, 42, 76),
+			BackgroundTransparency = on and 0.02 or 0.16,
 		})
 		tween(knob, nil, {
 			Position = on and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
-			BackgroundColor3 = on and themeColor(0.78, 0.28) or Color3.fromRGB(190, 180, 205),
+			BackgroundColor3 = on and Color3.fromRGB(250, 240, 255) or Color3.fromRGB(175, 158, 205),
 		})
 	end
 
@@ -1062,7 +1059,7 @@ function createSlider(parent, label, min, max, getValue, setValue)
 		Size = UDim2.new(1, 0, 0, 18),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.Gotham,
-		TextColor3 = Color3.fromRGB(240, 232, 250),
+		TextColor3 = Color3.fromRGB(255, 248, 255),
 		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, row)
@@ -1078,9 +1075,9 @@ function createSlider(parent, label, min, max, getValue, setValue)
 
 	local fill = themeRegister(make("Frame", {
 		Size = UDim2.new(0, 0, 1, 0),
-		BackgroundColor3 = Color3.fromRGB(215, 175, 255),
+		BackgroundColor3 = Color3.fromRGB(135, 70, 230),
 		BorderSizePixel = 0,
-	}, bar), "BackgroundColor3", 0.38, 1)
+	}, bar), "BackgroundColor3", 0.86, 0.82)
 	corner(fill, 3)
 
 	local knob = make("TextButton", {
@@ -1145,7 +1142,7 @@ function createThemePicker(parent)
 		BackgroundTransparency = 1,
 		Font = Enum.Font.Gotham,
 		Text = "Gui Theme",
-		TextColor3 = Color3.fromRGB(240, 232, 250),
+		TextColor3 = Color3.fromRGB(255, 248, 255),
 		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, row)
@@ -1201,6 +1198,7 @@ end
 local awaitingKeybindFor
 local keybindButtons = {}
 local freecamToggleRedraw
+local autoPickupToggleRedraw
 
 function keyName(keyCode)
 	return keyCode.Name:gsub("Left", "L"):gsub("Right", "R")
@@ -1228,7 +1226,7 @@ function createKeybind(parent, label, stateKey)
 		BackgroundTransparency = 1,
 		Font = Enum.Font.Gotham,
 		Text = label,
-		TextColor3 = Color3.fromRGB(230, 230, 235),
+		TextColor3 = Color3.fromRGB(255, 248, 255),
 		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, row)
@@ -1500,12 +1498,12 @@ function getServerList(placeId, cursor)
 	return S.HttpService:JSONDecode(body)
 end
 
-function serverMatchesRegion(server)
-	if state.ServerRegion == "Any" then
-		return true
-	end
+function serverPing(server)
+	return tonumber(server.ping or server.latency or server.roundTripTime) or math.huge
+end
 
-	local searchText = string.lower(table.concat({
+function serverRegionText(server)
+	return string.lower(table.concat({
 		tostring(server.region or ""),
 		tostring(server.location or ""),
 		tostring(server.regionName or ""),
@@ -1513,14 +1511,17 @@ function serverMatchesRegion(server)
 		tostring(server.serverRegion or ""),
 		tostring(server.countryCode or ""),
 	}, " "))
+end
 
-	if searchText == "     " then
+function serverMetadataMatchesRegion(server)
+	if state.ServerRegion == "Any" then
 		return true
 	end
+	local searchText = serverRegionText(server)
 
 	local wanted = {
-		["NA East"] = { "na-east", "useast", "us-east", "east", "virginia", "ashburn", "atlanta", "miami", "new york", "us", "usa" },
-		["NA West"] = { "na-west", "uswest", "us-west", "west", "california", "oregon", "los angeles", "san jose", "seattle", "us", "usa" },
+		["NA East"] = { "na-east", "useast", "us-east", "east", "virginia", "ashburn", "atlanta", "miami", "new york", "new jersey", "ohio", "chicago" },
+		["NA West"] = { "na-west", "uswest", "us-west", "west", "california", "oregon", "los angeles", "san jose", "seattle", "portland" },
 		["EU"] = { "eu", "europe", "germany", "frankfurt", "netherlands", "amsterdam", "uk", "london", "france", "paris" },
 		["Asia"] = { "asia", "singapore", "tokyo", "japan", "hong kong", "korea", "seoul" },
 		["Oceania"] = { "oceania", "australia", "sydney" },
@@ -1534,9 +1535,31 @@ function serverMatchesRegion(server)
 	return false
 end
 
+function serverMatchesRegion(server, bestPing)
+	if state.ServerRegion == "Any" then
+		return true
+	end
+	local ping = serverPing(server)
+	local slack = state.ServerRegion == "NA East" and 35
+		or state.ServerRegion == "NA West" and 45
+		or state.ServerRegion == "EU" and 55
+		or 70
+	local ceiling = state.ServerRegion == "NA East" and 120
+		or state.ServerRegion == "NA West" and 150
+		or state.ServerRegion == "EU" and 190
+		or state.ServerRegion == "Asia" and 230
+		or 260
+	if serverMetadataMatchesRegion(server) then
+		return ping == math.huge or ping <= ceiling
+	end
+	if ping == math.huge then
+		return false
+	end
+	return ping <= math.min(ceiling, (bestPing or ping) + slack)
+end
+
 function chooseServer(wantsFullest)
-	local bestServer
-	local fallbackServer
+	local servers = {}
 	local cursor
 	local placeId = PLACE.ServerList
 
@@ -1551,22 +1574,7 @@ function chooseServer(wantsFullest)
 			local playing = tonumber(server.playing) or 0
 			local maxPlayers = tonumber(server.maxPlayers) or 0
 			if server.id and server.id ~= game.JobId and playing < maxPlayers then
-				if not fallbackServer then
-					fallbackServer = server
-				elseif wantsFullest and playing > (tonumber(fallbackServer.playing) or 0) then
-					fallbackServer = server
-				elseif not wantsFullest and playing < (tonumber(fallbackServer.playing) or math.huge) then
-					fallbackServer = server
-				end
-				if serverMatchesRegion(server) then
-					if not bestServer then
-						bestServer = server
-					elseif wantsFullest and playing > (tonumber(bestServer.playing) or 0) then
-						bestServer = server
-					elseif not wantsFullest and playing < (tonumber(bestServer.playing) or math.huge) then
-						bestServer = server
-					end
-				end
+				table.insert(servers, server)
 			end
 		end
 
@@ -1576,14 +1584,42 @@ function chooseServer(wantsFullest)
 		end
 	end
 
-	return bestServer or fallbackServer
+	if #servers == 0 then
+		return nil
+	end
+
+	local bestPing = math.huge
+	for _, server in ipairs(servers) do
+		bestPing = math.min(bestPing, serverPing(server))
+	end
+
+	local bestServer
+	for _, server in ipairs(servers) do
+		if serverMatchesRegion(server, bestPing) then
+			local playing = tonumber(server.playing) or 0
+			local ping = serverPing(server)
+			if not bestServer then
+				bestServer = server
+			else
+				local bestPlaying = tonumber(bestServer.playing) or 0
+				local bestServerPing = serverPing(bestServer)
+				if wantsFullest and (playing > bestPlaying or (playing == bestPlaying and ping < bestServerPing)) then
+					bestServer = server
+				elseif not wantsFullest and (playing < bestPlaying or (playing == bestPlaying and ping < bestServerPing)) then
+					bestServer = server
+				end
+			end
+		end
+	end
+
+	return bestServer
 end
 
 function joinServerBySize(wantsFullest)
 	local placeId = PLACE.ServerList
 	local server = chooseServer(wantsFullest)
 	if not server then
-		notify("Server Hop", "No joinable server found.")
+		notify("Server Hop", "No low-ping " .. state.ServerRegion .. " server found.")
 		return
 	end
 
@@ -1593,6 +1629,9 @@ function joinServerBySize(wantsFullest)
 	if not ok then
 		warn("Server hop failed:", err)
 		notify("Server Hop", "Teleport failed. Check output.")
+	else
+		local ping = serverPing(server)
+		notify("Server Hop", string.format("Joining %s server. Ping: %s", state.ServerRegion, ping == math.huge and "?" or tostring(math.floor(ping + 0.5))))
 	end
 end
 
@@ -1838,15 +1877,7 @@ function animatePickupPart(part)
 	end)
 end
 
-function updateAutoPickup(dt)
-	if not state.AutoPickup then
-		return
-	end
-	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < 0.05 then
-		return
-	end
-	autoHeal.PickupTimer = 0
+function pickupClosestItem(essenceOnly)
 	if not loadPickupModules() then
 		return
 	end
@@ -1857,7 +1888,7 @@ function updateAutoPickup(dt)
 	end
 	local closestPart, closestDist = nil, math.huge
 	for _, part in ipairs(itemsFolder:GetChildren()) do
-		if part:IsA("BasePart") and part:GetAttribute("EntityID") then
+		if part:IsA("BasePart") and part:GetAttribute("EntityID") and (not essenceOnly or part.Name:find("Essence")) then
 			local dist = (root.Position - part.Position).Magnitude
 			if dist < closestDist then
 				closestDist = dist
@@ -1875,6 +1906,18 @@ function updateAutoPickup(dt)
 		end
 		animatePickupPart(closestPart)
 	end
+end
+
+function updateAutoPickup(dt)
+	if not state.AutoPickup and not state.PickupEssence then
+		return
+	end
+	autoHeal.PickupTimer += dt
+	if autoHeal.PickupTimer < 0.05 then
+		return
+	end
+	autoHeal.PickupTimer = 0
+	pickupClosestItem(state.PickupEssence)
 end
 
 function getDropPacket()
@@ -2110,7 +2153,6 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		ZIndex = 80,
 	}, screenGui)
 	corner(overlay, 8)
-	stroke(overlay, Color3.fromRGB(255, 255, 255), 0.7, 1)
 
 	make("UIPadding", {
 		PaddingLeft = UDim.new(0, 8),
@@ -2331,7 +2373,6 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		ZIndex = 80,
 	}, screenGui)
 	corner(overlay, 8)
-	stroke(overlay, Color3.fromRGB(255, 255, 255), 0.7, 1)
 	make("UIPadding", {
 		PaddingLeft = UDim.new(0, 6),
 		PaddingRight = UDim.new(0, 6),
@@ -2827,7 +2868,27 @@ function updateAutoRun()
 end
 
 --// ESP
+function readableEspColor(color)
+	local brightness = color.R * 0.299 + color.G * 0.587 + color.B * 0.114
+	if brightness >= 0.22 then
+		return color
+	end
+	return Color3.fromRGB(
+		math.floor(math.clamp(color.R * 255 + 150, 165, 255)),
+		math.floor(math.clamp(color.G * 255 + 150, 165, 255)),
+		math.floor(math.clamp(color.B * 255 + 150, 165, 255))
+	)
+end
+
+function itemTextColor(name, color)
+	if name and string.find(string.lower(name), "god", 1, true) then
+		return Color3.fromRGB(255, 220, 70)
+	end
+	return color and readableEspColor(color) or Color3.fromRGB(245, 245, 245)
+end
+
 function createBillboard(name, color, size, hasSubText)
+	local textColor = readableEspColor(color)
 	local billboard = make("BillboardGui", {
 		Name = "ControlPanelEspBillboard",
 		Size = hasSubText and UDim2.new(0, 190, 0, 54) or UDim2.new(0, 180, 0, 42),
@@ -2841,8 +2902,9 @@ function createBillboard(name, color, size, hasSubText)
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = name,
-		TextColor3 = color,
-		TextStrokeTransparency = 0.35,
+		TextColor3 = textColor,
+		TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+		TextStrokeTransparency = 0.18,
 		TextSize = size,
 		TextWrapped = true,
 	}, billboard)
@@ -2853,8 +2915,9 @@ function createBillboard(name, color, size, hasSubText)
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = "",
-		TextColor3 = color,
-		TextStrokeTransparency = 0.35,
+		TextColor3 = textColor,
+		TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+		TextStrokeTransparency = 0.18,
 		TextSize = math.max(10, size - 2),
 		TextWrapped = true,
 		Visible = false,
@@ -2980,7 +3043,7 @@ function ensurePlayerEsp(targetPlayer)
 	obj.Billboard.Enabled = state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
 	obj.Highlight.Enabled = state.PlayerEsp and state.PlayerChams
 	obj.Text.TextSize = state.PlayerTextSize
-	obj.Text.TextColor3 = teamColor
+	obj.Text.TextColor3 = readableEspColor(teamColor)
 	obj.Text.Visible = state.PlayerNames
 	obj.Highlight.FillColor = teamColor
 	obj.Highlight.OutlineColor = teamColor
@@ -3006,7 +3069,7 @@ function ensurePlayerEsp(targetPlayer)
 	if obj.ToolText then
 		local toolName, toolColor = getPlayerToolInfo(targetPlayer)
 		obj.ToolText.Text = toolName or ""
-		obj.ToolText.TextColor3 = toolColor or Color3.fromRGB(245, 245, 245)
+		obj.ToolText.TextColor3 = itemTextColor(toolName, toolColor)
 		obj.ToolText.TextSize = math.max(10, state.PlayerTextSize - 2)
 		obj.ToolText.Visible = state.PlayerTools and toolName ~= nil
 	end
@@ -3200,6 +3263,16 @@ function getGodColor(instance)
 		parent = parent.Parent
 	end
 	return worldRules.God.color
+end
+
+function getGodHealth(instance)
+	local model = instance:IsA("Model") and instance or instance:FindFirstAncestorWhichIsA("Model")
+	local health = model and model:FindFirstChild("Health")
+	if health and health:IsA("IntValue") then
+		return health.Value
+	end
+	health = instance:FindFirstChild("Health", true)
+	return health and health:IsA("IntValue") and health.Value or nil
 end
 
 function getFolder(name)
@@ -3431,7 +3504,7 @@ function ensureWorldEsp(instance, ruleName)
 		or rule.color
 	local obj = esp.World[instance]
 	if not obj then
-		local billboard, text = createBillboard(instance.Name, color, state.WorldTextSize)
+		local billboard, text, subText = createBillboard(instance.Name, color, state.WorldTextSize, ruleName == "God")
 		local highlight = createHighlight(color)
 		local tracer = createTracer(color)
 		billboard.Parent = screenGui
@@ -3442,6 +3515,7 @@ function ensureWorldEsp(instance, ruleName)
 			RuleName = ruleName,
 			Billboard = billboard,
 			Text = text,
+			SubText = subText,
 			Highlight = highlight,
 			Tracer = tracer,
 		}
@@ -3449,6 +3523,10 @@ function ensureWorldEsp(instance, ruleName)
 	end
 
 	obj.Billboard.Adornee = adornee
+	obj.Billboard.StudsOffset = ruleName == "Dropped" and Vector3.new(0, 1.25, 0) or Vector3.new(0, 3, 0)
+	obj.Billboard.Size = ruleName == "Dropped" and UDim2.new(0, 132, 0, 30)
+		or ruleName == "God" and UDim2.new(0, 190, 0, 54)
+		or UDim2.new(0, 180, 0, 42)
 	obj.Highlight.Adornee = instance:IsA("Model") and instance or adornee
 	obj.Billboard.Enabled = state.WorldNames
 	obj.Highlight.Enabled = state.WorldChams
@@ -3456,11 +3534,14 @@ function ensureWorldEsp(instance, ruleName)
 	obj.Highlight.OutlineColor = color
 	obj.Tracer.BackgroundColor3 = color
 	obj.Text.TextSize = state.WorldTextSize
-	obj.Text.TextColor3 = ruleName == "Event" and isRainbowEvent(instance) and rainbowColor(0.12) or color
 
 	local label = ruleName == "Event" and getEventLabel(instance)
 		or ruleName == "Ore" and selectionName(instance)
 		or instance.Name
+	local textColor = ruleName == "Event" and isRainbowEvent(instance) and rainbowColor(0.12)
+		or ruleName == "Dropped" and itemTextColor(label, color)
+		or readableEspColor(color)
+	obj.Text.TextColor3 = textColor
 	if ruleName == "Totem" then
 		local health = getTotemHealth(instance)
 		if health then
@@ -3471,6 +3552,13 @@ function ensureWorldEsp(instance, ruleName)
 		label ..= string.format(" [%dm]", distanceFromLocal(adornee))
 	end
 	obj.Text.Text = label
+	if obj.SubText then
+		local health = ruleName == "God" and getGodHealth(instance)
+		obj.SubText.Visible = ruleName == "God" and health ~= nil
+		obj.SubText.Text = health and string.format("Health: %d", math.floor(health + 0.5)) or ""
+		obj.SubText.TextColor3 = textColor
+		obj.SubText.TextSize = math.max(10, state.WorldTextSize - 2)
+	end
 
 	drawTracer(obj.Tracer, adornee.Position, state.WorldTracers)
 end
@@ -3839,8 +3927,12 @@ end)
 createFilterDropdown(sections.AutoDrop, "Drop Items", collectInventoryNames, selections.AutoDrop, false, true)
 
 sections.AutoPickup = section(autoPage, "Pickup")
-createToggle(sections.AutoPickup, "Auto Pickup", function() return state.AutoPickup end, function(v)
+autoPickupToggleRedraw = createToggle(sections.AutoPickup, "Auto Pickup", function() return state.AutoPickup end, function(v)
 	state.AutoPickup = v
+	notify("Auto Pickup", v and "On" or "Off")
+end)
+createToggle(sections.AutoPickup, "Pickup Essence", function() return state.PickupEssence end, function(v)
+	state.PickupEssence = v
 end)
 
 sections.PlayerEsp = section(visualPage, "Player ESP")
@@ -3926,6 +4018,7 @@ createToggle(sections.Settings, "Dance", function() return state.Dance end, setD
 createKeybind(sections.Settings, "GUI Toggle Key", "ToggleKey")
 createKeybind(sections.Settings, "Freecam Toggle Key", "FreecamToggleKey")
 createKeybind(sections.Settings, "AutoRun Key", "AutoRunKey")
+createKeybind(sections.Settings, "Auto Pickup Key", "AutoPickupKey")
 createToggle(sections.Settings, "See Recipe", function() return state.SeeRecipe end, setSeeRecipe)
 freecamToggleRedraw = createToggle(sections.Settings, "Freecam", function() return state.Freecam end, setFreecam)
 createActionButton(sections.Settings, "Reset GUI", resetGuiLayout)
@@ -4071,6 +4164,15 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 
 	if input.KeyCode == state.AutoRunKey then
 		state.AutoRun = not state.AutoRun
+		return
+	end
+
+	if input.KeyCode == state.AutoPickupKey then
+		state.AutoPickup = not state.AutoPickup
+		if autoPickupToggleRedraw then
+			autoPickupToggleRedraw()
+		end
+		notify("Auto Pickup", state.AutoPickup and "On" or "Off")
 		return
 	end
 
@@ -4298,7 +4400,18 @@ connect(S.RunService.RenderStepped, function(dt)
 					end
 					obj.Text.Text = label
 					obj.Text.TextSize = state.WorldTextSize
-					obj.Text.TextColor3 = color
+					local baseLabel = obj.RuleName == "Event" and getEventLabel(obj.Instance)
+						or obj.RuleName == "Ore" and selectionName(obj.Instance)
+						or obj.Instance.Name
+					local textColor = obj.RuleName == "Dropped" and itemTextColor(baseLabel, color) or readableEspColor(color)
+					obj.Text.TextColor3 = textColor
+					if obj.SubText then
+						local health = obj.RuleName == "God" and getGodHealth(obj.Instance)
+						obj.SubText.Visible = obj.RuleName == "God" and health ~= nil
+						obj.SubText.Text = health and string.format("Health: %d", math.floor(health + 0.5)) or ""
+						obj.SubText.TextSize = math.max(10, state.WorldTextSize - 2)
+						obj.SubText.TextColor3 = textColor
+					end
 					obj.Billboard.Enabled = state.WorldNames
 					obj.Highlight.Enabled = state.WorldChams
 					obj.Highlight.FillColor = color
