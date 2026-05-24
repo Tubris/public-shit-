@@ -387,6 +387,9 @@ local autoHeal = {
 	LastActualHealth = nil,
 	LastHealDrop = nil,
 	LastHealNotify = 0,
+	HealPending = false,
+	HealPendingUntil = 0,
+	HealEventUsed = 0,
 	AutoDisconnectTimer = 0,
 	AutoDisconnectLastHealth = nil,
 	AutoDisconnectLastDamage = 0,
@@ -419,6 +422,7 @@ local autoHeal = {
 	NoclipTimer = 0,
 	RopeTimer = 0,
 	RopeTouching = {},
+	RopeStates = {},
 	ItemIDs = nil,
 	Toolbar = nil,
 	PlantItemIDs = {},
@@ -430,6 +434,8 @@ local autoHeal = {
 	DropPacket = nil,
 	DropOrder = {},
 	GodCounters = {},
+	GodRespawns = {},
+	GodRespawnTimer = 0,
 	ChestPreview = nil,
 	ChestLastPlace = 0,
 	PlantBoxPreview = {},
@@ -2002,6 +2008,8 @@ function updateAutoHeal(dt)
 		autoHeal.HealNotified = false
 		autoHeal.ExpectedHealth = nil
 		autoHeal.LastHealDrop = nil
+		autoHeal.HealPending = false
+		autoHeal.HealEventUsed = 0
 		return
 	end
 	autoHeal.Timer += dt
@@ -2019,6 +2027,10 @@ function updateAutoHeal(dt)
 		autoHeal.ExpectedHealth = nil
 		autoHeal.LastHealDrop = actualHealth
 		autoHeal.HealNotified = false
+		autoHeal.HealPending = false
+		autoHeal.HealEventUsed = 0
+	elseif autoHeal.LastActualHealth and actualHealth > autoHeal.LastActualHealth + 0.5 then
+		autoHeal.HealPending = false
 	end
 	autoHeal.LastActualHealth = actualHealth
 	if autoHeal.ExpectedHealth and now < autoHeal.ExpectedHealthUntil then
@@ -2029,13 +2041,22 @@ function updateAutoHeal(dt)
 	if health > state.AutoHealHealth then
 		autoHeal.HealNotified = false
 		autoHeal.LastHealDrop = nil
+		autoHeal.HealPending = false
+		autoHeal.HealEventUsed = 0
 		return
 	end
+	if autoHeal.HealPending and now < autoHeal.HealPendingUntil then
+		return
+	end
+	autoHeal.HealPending = false
 	local slot, _, quantity = findBloodfruit()
 	local usedItem = "Blood Fruit"
 	if slot and quantity > 0 then
 		local targetHealth = math.min(state.AutoHealHealth, getLocalMaxHealth() or state.AutoHealHealth)
-		local amount = math.min(quantity, math.max(1, math.ceil((targetHealth - actualHealth) / 3)))
+		local eventDrop = autoHeal.LastHealDrop or actualHealth
+		local eventBudget = math.max(1, math.ceil((targetHealth - eventDrop) / 3))
+		local remainingBudget = eventBudget - (autoHeal.HealEventUsed or 0)
+		local amount = math.min(quantity, math.max(0, remainingBudget))
 		if amount <= 0 then
 			return
 		end
@@ -2045,6 +2066,9 @@ function updateAutoHeal(dt)
 			end)
 		end
 		autoHeal.LastUse = now
+		autoHeal.HealEventUsed = (autoHeal.HealEventUsed or 0) + amount
+		autoHeal.HealPending = true
+		autoHeal.HealPendingUntil = now + 3
 		autoHeal.ExpectedHealth = math.min(getLocalMaxHealth() or 100, actualHealth + amount * 3)
 		autoHeal.ExpectedHealthUntil = now + 1.75
 		if not autoHeal.HealNotified then
@@ -2080,6 +2104,8 @@ function updateAutoHeal(dt)
 	end)
 	if ok then
 		autoHeal.LastUse = now
+		autoHeal.HealPending = true
+		autoHeal.HealPendingUntil = now + 2
 		if not autoHeal.HealNotified then
 			notify("Auto Heal", string.format("Dropped to %d HP. Used fallback: %s.", math.floor((autoHeal.LastHealDrop or actualHealth) + 0.5), usedItem))
 			autoHeal.HealNotified = true
@@ -2964,24 +2990,35 @@ function auraEntityID(instance)
 	if not instance then
 		return nil
 	end
-	local entityID = instance:GetAttribute("EntityID")
+	local function readAuraID(obj)
+		local id = obj:GetAttribute("EntityID") or obj:GetAttribute("EntityId") or obj:GetAttribute("entityID") or obj:GetAttribute("entityId")
+		if id then
+			return id
+		end
+		local value = obj:FindFirstChild("EntityID") or obj:FindFirstChild("EntityId") or obj:FindFirstChild("entityID") or obj:FindFirstChild("entityId")
+		if value and value:IsA("ValueBase") then
+			return value.Value
+		end
+		return nil
+	end
+	local entityID = readAuraID(instance)
 	if entityID then
 		return entityID
 	end
 	local adornee = getAdornee(instance)
-	entityID = adornee and adornee:GetAttribute("EntityID")
+	entityID = adornee and readAuraID(adornee)
 	if entityID then
 		return entityID
 	end
 	for _, descendant in ipairs(instance:GetDescendants()) do
-		entityID = descendant:GetAttribute("EntityID")
+		entityID = readAuraID(descendant)
 		if entityID then
 			return entityID
 		end
 	end
 	local parent = instance.Parent
 	while parent and parent ~= workspace do
-		entityID = parent:GetAttribute("EntityID")
+		entityID = readAuraID(parent)
 		if entityID then
 			return entityID
 		end
@@ -2991,7 +3028,7 @@ function auraEntityID(instance)
 end
 
 function addAuraCandidate(list, model, auraType, seen)
-	if not model or (not model:IsA("Model") and not model:IsA("BasePart")) then
+	if not model or (not model:IsA("Model") and not model:IsA("BasePart") and not model:IsA("Folder")) then
 		return
 	end
 	local entityID = auraEntityID(model)
@@ -3009,9 +3046,23 @@ function addAuraFolderCandidates(list, folder, auraType, seen, excludeLocalPlaye
 	end
 	local localModel = folder:FindFirstChild(player.Name)
 	for _, obj in ipairs(folder:GetDescendants()) do
-		if (obj:IsA("Model") or obj:IsA("BasePart"))
+		if (obj:IsA("Model") or obj:IsA("BasePart") or obj:IsA("Folder"))
 			and (not excludeLocalPlayer or (obj ~= localModel and not (localModel and obj:IsDescendantOf(localModel)))) then
 			addAuraCandidate(list, obj, auraType, seen)
+		end
+	end
+end
+
+function addAuraFoldersByName(list, folderNames, auraType, seen)
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("Folder") or obj:IsA("Model") then
+			for _, folderName in ipairs(folderNames) do
+				if string.lower(obj.Name) == string.lower(folderName) then
+					addAuraCandidate(list, obj, auraType, seen)
+					addAuraFolderCandidates(list, obj, auraType, seen, false)
+					break
+				end
+			end
 		end
 	end
 end
@@ -3042,6 +3093,8 @@ function refreshAuraCandidates()
 				addAuraCandidate(candidates, model, "Mob", seen)
 			end
 			addAuraFolderCandidates(candidates, crittersFolder, "Mob", seen, false)
+		else
+			addAuraFoldersByName(candidates, { "Critters", "Mobs", "Mob", "Enemies" }, "Mob", seen)
 		end
 	end
 	if state.MineAura then
@@ -3093,7 +3146,7 @@ function considerAuraTarget(best, candidate, rootPosition, auraType)
 	local position = adornee.Position
 	local offset = rootPosition - position
 	local distanceSq = offset:Dot(offset)
-	local maxDistanceSq = auraType == "Weapon" and 10000 or 3600
+	local maxDistanceSq = auraType == "Weapon" and 81 or 1600
 	if distanceSq <= maxDistanceSq and (not best or distanceSq < best.DistanceSq) then
 		return { EntityID = entityID, Position = position, DistanceSq = distanceSq }
 	end
@@ -3115,42 +3168,7 @@ function restorePlayerAuraHitboxes()
 end
 
 function updatePlayerAuraHitboxes()
-	if not state.WeaponAura then
-		restorePlayerAuraHitboxes()
-		return
-	end
-	local playersFolder = workspace:FindFirstChild("Players")
-	if not playersFolder then
-		return
-	end
-	local localModel = playersFolder:FindFirstChild(player.Name)
-	for _, model in ipairs(playersFolder:GetDescendants()) do
-		if model:IsA("Model")
-			and model.Name ~= player.Name
-			and model ~= localModel
-			and not (localModel and model:IsDescendantOf(localModel)) then
-			local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-			if part and part:IsA("BasePart") then
-				if not autoHeal.PlayerHitboxes[part] then
-					autoHeal.PlayerHitboxes[part] = {
-						Size = part.Size,
-						Transparency = part.Transparency,
-						CanCollide = part.CanCollide,
-						Massless = part.Massless,
-					}
-				end
-				part.Size = Vector3.new(14, 14, 14)
-				part.Transparency = math.max(part.Transparency, 0.75)
-				part.CanCollide = false
-				part.Massless = true
-			end
-		end
-	end
-	for part in pairs(autoHeal.PlayerHitboxes) do
-		if not part or not part.Parent then
-			autoHeal.PlayerHitboxes[part] = nil
-		end
-	end
+	restorePlayerAuraHitboxes()
 end
 
 function closestAuraTarget(rootPosition, auraType)
@@ -3178,7 +3196,57 @@ function auraTargets(rootPosition, auraType, maxTargets)
 	return targets
 end
 
-function sendAuraAttack(targets, root)
+function weaponAuraTargets(rootPosition)
+	local targets = {}
+	local playersFolder = workspace:FindFirstChild("Players")
+	if not playersFolder then
+		return targets
+	end
+	for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+		if targetPlayer ~= player then
+			local model = playersFolder:FindFirstChild(targetPlayer.Name)
+			local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true))
+			local entityID = model and auraEntityID(model)
+			if root and entityID then
+				local offset = rootPosition - root.Position
+				local distanceSq = offset:Dot(offset)
+				if distanceSq <= 81 then
+					table.insert(targets, { EntityID = entityID, Position = root.Position, DistanceSq = distanceSq })
+				end
+			end
+		end
+	end
+	table.sort(targets, function(a, b)
+		return a.DistanceSq < b.DistanceSq
+	end)
+	while #targets > 1 do
+		table.remove(targets)
+	end
+	return targets
+end
+
+function sendAuraAttackDirect(targets, cf, timestamp)
+	local remote = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
+	if not remote or not buffer then
+		return false
+	end
+	local parts = { string.char(0x00, 0x13), string.pack("<H", #targets) }
+	for _, target in ipairs(targets) do
+		local entityID = tonumber(target.EntityID)
+		if not entityID then
+			return false
+		end
+		table.insert(parts, string.pack("<I4x", entityID))
+	end
+	local x, y, z = cf:ToEulerAnglesXYZ()
+	table.insert(parts, string.pack("<fffHHHd", cf.X, cf.Y, cf.Z, float16(x), float16(y), float16(z), timestamp))
+	local ok = pcall(function()
+		remote:FireServer(buffer.fromstring(table.concat(parts)))
+	end)
+	return ok
+end
+
+function sendAuraAttack(targets, root, useRootCFrame)
 	if not targets or #targets == 0 then
 		return
 	end
@@ -3188,18 +3256,51 @@ function sendAuraAttack(targets, root)
 		return
 	end
 	local flat = Vector3.new(direction.X, 0, direction.Z)
-	local spoofedCFrame = flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
+	local spoofedCFrame = useRootCFrame and root.CFrame or flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
 	local entityList = {}
 	for _, target in ipairs(targets) do
 		table.insert(entityList, { entityID = target.EntityID, buffer = nil })
+	end
+	local timestamp = workspace:GetServerTimeNow()
+	if sendAuraAttackDirect(targets, spoofedCFrame, timestamp) then
+		return
+	end
+	if not autoHeal.Packets or not autoHeal.Packets.SwingTool then
+		return
 	end
 	pcall(function()
 		autoHeal.Packets.SwingTool.send({
 			entityIDs = entityList,
 			cframe = spoofedCFrame,
-			timestamp = tick(),
+			timestamp = timestamp,
 		})
 	end)
+end
+
+function mobAuraTargets(rootPosition)
+	local targets = {}
+	local crittersFolder = workspace:FindFirstChild("Critters")
+	if not crittersFolder then
+		return targets
+	end
+	for _, critter in ipairs(crittersFolder:GetChildren()) do
+		local part = critter:IsA("BasePart") and critter or critter.PrimaryPart or critter:FindFirstChildWhichIsA("BasePart", true)
+		local entityID = auraEntityID(critter)
+		if part and entityID then
+			local offset = rootPosition - part.Position
+			local distanceSq = offset:Dot(offset)
+			if distanceSq <= 1600 then
+				table.insert(targets, { EntityID = entityID, Position = part.Position, DistanceSq = distanceSq })
+			end
+		end
+	end
+	table.sort(targets, function(a, b)
+		return a.DistanceSq < b.DistanceSq
+	end)
+	while #targets > 1 do
+		table.remove(targets)
+	end
+	return targets
 end
 
 function updateAuras(dt)
@@ -3216,22 +3317,20 @@ function updateAuras(dt)
 	end
 	updatePlayerAuraHitboxes()
 	autoHeal.AuraScanTimer += dt
-	if autoHeal.AuraScanTimer >= 1 or #autoHeal.AuraCandidates == 0 then
+	if autoHeal.AuraScanTimer >= 2.5 or #autoHeal.AuraCandidates == 0 then
 		autoHeal.AuraScanTimer = 0
 		refreshAuraCandidates()
 	end
-	if not loadAutoHealModules() or not autoHeal.Packets.SwingTool then
-		return
-	end
+	loadAutoHealModules()
 	local currentCharacter, hum, root = getCharacterParts()
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
 	end
 	if state.WeaponAura then
 		autoHeal.WeaponAuraTimer += dt
-		if autoHeal.WeaponAuraTimer >= 0.3 then
+		if autoHeal.WeaponAuraTimer >= 0.12 then
 			autoHeal.WeaponAuraTimer = 0
-			sendAuraAttack(auraTargets(root.Position, "Weapon", 1), root)
+			sendAuraAttack(weaponAuraTargets(root.Position), root)
 		end
 	end
 	if state.MineAura or state.MobAura then
@@ -3242,7 +3341,7 @@ function updateAuras(dt)
 				sendAuraAttack(auraTargets(root.Position, "Mine", 3), root)
 			end
 			if state.MobAura then
-				sendAuraAttack(auraTargets(root.Position, "Mob", 1), root)
+				sendAuraAttack(mobAuraTargets(root.Position), root, true)
 			end
 		end
 	end
@@ -4905,6 +5004,109 @@ function godCounterText(instance, health)
 	return string.format("Health: %d", math.floor(health + 0.5))
 end
 
+function godRespawnSeconds(name)
+	return name == "Ancient Tree" and 5000 or 1000
+end
+
+function formatRespawnMinutes(seconds)
+	return string.format("%.1fm", math.max(0, seconds) / 60)
+end
+
+function ensureGodRespawnData(name, color)
+	autoHeal.GodRespawns[name] = autoHeal.GodRespawns[name] or {}
+	local data = autoHeal.GodRespawns[name]
+	if not data.Marker or not data.Marker.Parent then
+		data.Marker = make("Part", {
+			Name = "ChubbisonRespawn_" .. name:gsub("%W", "_"),
+			Anchored = true,
+			CanCollide = false,
+			CanTouch = false,
+			CanQuery = false,
+			Transparency = 1,
+			Size = Vector3.new(1, 1, 1),
+		}, workspace)
+	end
+	if not data.Billboard or not data.Billboard.Parent then
+		data.Billboard, data.Text = createBillboard(name, color, state.WorldTextSize, false)
+		data.Billboard.Parent = screenGui
+		data.Billboard.Adornee = data.Marker
+	end
+	return data
+end
+
+function hideGodRespawnMarkers()
+	for _, data in pairs(autoHeal.GodRespawns) do
+		if data.Billboard then
+			data.Billboard.Enabled = false
+		end
+	end
+end
+
+function clearGodRespawnMarkers()
+	for name, data in pairs(autoHeal.GodRespawns) do
+		if data.Billboard then data.Billboard:Destroy() end
+		if data.Marker then data.Marker:Destroy() end
+		autoHeal.GodRespawns[name] = nil
+	end
+end
+
+function updateGodRespawnMarkers(dt)
+	autoHeal.GodRespawnTimer += dt
+	if autoHeal.GodRespawnTimer < 0.5 then
+		return
+	end
+	autoHeal.GodRespawnTimer = 0
+	if not state.GodEsp then
+		hideGodRespawnMarkers()
+		return
+	end
+
+	local now = os.clock()
+	local alive = {}
+	local resources = workspace:FindFirstChild("Resources")
+	if resources then
+		for _, instance in ipairs(resources:GetChildren()) do
+			if isGodInstance(instance) then
+				local name = instance.Name
+				local health = getGodHealth(instance)
+				local adornee = getAdornee(instance)
+				local color = getGodColor(instance)
+				local data = ensureGodRespawnData(name, color)
+				if adornee then
+					data.Position = adornee.Position
+					data.Color = color
+				end
+				if not health or health > 0 then
+					alive[name] = true
+					data.MissingSince = nil
+					if data.Billboard then
+						data.Billboard.Enabled = false
+					end
+				elseif data.Position and not data.MissingSince then
+					data.MissingSince = now
+				end
+			end
+		end
+	end
+
+	for name, data in pairs(autoHeal.GodRespawns) do
+		if data.Position and not alive[name] then
+			if not data.MissingSince then
+				data.MissingSince = now
+			end
+			local remaining = godRespawnSeconds(name) - (now - data.MissingSince)
+			local color = data.Color or (name == "Ancient Tree" and Color3.fromRGB(255, 220, 70) or worldRules.God.color)
+			ensureGodRespawnData(name, color)
+			data.Marker.CFrame = CFrame.new(data.Position)
+			data.Billboard.Enabled = true
+			data.Billboard.Size = UDim2.fromOffset(230, 44)
+			data.Text.TextColor3 = readableEspColor(color)
+			data.Text.TextSize = state.WorldTextSize
+			data.Text.Text = name .. " Respawn: " .. (remaining > 0 and formatRespawnMinutes(remaining) or "soon")
+		end
+	end
+end
+
 function getFolder(name)
 	return workspace:FindFirstChild(name)
 end
@@ -5378,7 +5580,7 @@ function findClimbablePartAt(position)
 	if not folder then
 		return nil
 	end
-	for _, part in ipairs(folder:GetChildren()) do
+	for _, part in ipairs(folder:GetDescendants()) do
 		if part:IsA("BasePart") and (part.Position - position).Magnitude <= 1 then
 			return part
 		end
@@ -5406,6 +5608,15 @@ function updateIslandRopeNotifier(dt)
 		Ancient = { Name = "Ancient Tree", Part = findClimbablePartAt(Vector3.new(-489.2002258300781, 234.5003662109375, -888.9686889648438)) },
 		Crystal = { Name = "Crystal", Part = findClimbablePartAt(Vector3.new(-518, 80.5, -607)) },
 	}
+	for key, rope in pairs(ropes) do
+		local exists = rope.Part ~= nil
+		if autoHeal.RopeStates[key] == nil then
+			autoHeal.RopeStates[key] = exists
+		elseif autoHeal.RopeStates[key] ~= exists then
+			autoHeal.RopeStates[key] = exists
+			notify("Island Rope", rope.Name .. " Island Rope " .. (exists and "Respawned" or "Destroyed"))
+		end
+	end
 	local playersFolder = workspace:FindFirstChild("Players")
 	if not playersFolder then
 		return
@@ -5800,7 +6011,13 @@ createToggle(sections.WorldKinds, "Entities", function() return state.EntityEsp 
 end)
 createToggle(sections.WorldKinds, "Mob ESP", function() return state.MobEsp end, function(v) state.MobEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "Events", function() return state.EventEsp end, function(v) state.EventEsp = v; updateWorldEsp() end)
-createToggle(sections.WorldKinds, "God ESP", function() return state.GodEsp end, function(v) state.GodEsp = v; updateWorldEsp() end)
+createToggle(sections.WorldKinds, "God ESP", function() return state.GodEsp end, function(v)
+	state.GodEsp = v
+	if v then
+		notify("God ESP", "Need at least Steel Picaxe to mine Gods.")
+	end
+	updateWorldEsp()
+end)
 createToggle(sections.WorldKinds, "Portal ESP", function() return state.PortalEsp end, function(v) state.PortalEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "Ant Hill ESP", function() return state.AntHillEsp end, function(v) state.AntHillEsp = v; updateWorldEsp() end)
 createToggle(sections.WorldKinds, "Totem ESP", function() return state.TotemEsp end, function(v) state.TotemEsp = v; updateWorldEsp() end)
@@ -6217,6 +6434,7 @@ connect(S.RunService.RenderStepped, function(dt)
 		updateBloodFruitCounter()
 	end
 	updateIslandRopeNotifier(dt)
+	updateGodRespawnMarkers(dt)
 	if state.GuiThemeRgb then
 		autoHeal.ThemeRgbTimer += dt
 		if autoHeal.ThemeRgbTimer >= 0.08 then
@@ -6371,6 +6589,7 @@ screenGui.Destroying:Connect(function()
 	stopFly()
 	restorePlayerAuraHitboxes()
 	clearPlantBoxVisualizer()
+	clearGodRespawnMarkers()
 	setCoreChatVisible(defaults.ChatEnabled)
 	workspace.Gravity = defaults.Gravity
 	player.CameraMaxZoomDistance = defaults.CameraMaxZoom
