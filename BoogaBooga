@@ -168,11 +168,13 @@ local selections = {
 		Apple = true,
 		Lemon = true,
 		Berry = true,
+		Banana = true,
+		Bluefruit = true,
 		["Blood Fruit"] = false,
 	},
 }
 
-local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Blood Fruit" }
+local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
 local oreFallbackColors = {
@@ -340,6 +342,7 @@ local autoHeal = {
 	PickupModule = nil,
 	PickupRemote = nil,
 	PickupSound = nil,
+	PickupByteNet = nil,
 	PickupTimer = 0,
 	PlayerEspTimer = 0,
 	OrbitTimer = 0,
@@ -2150,47 +2153,82 @@ function animatePickupPart(part)
 	end)
 end
 
-function pickupClosestItem(essenceOnly)
-	if not loadPickupModules() then
+function pickupEncode(entityID)
+	return string.pack("<BBI3x", 0x01, 0xE7, entityID)
+end
+
+function getPickupByteNet()
+	if autoHeal.PickupByteNet and autoHeal.PickupByteNet.Parent then
+		return autoHeal.PickupByteNet
+	end
+	autoHeal.PickupByteNet = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
+	return autoHeal.PickupByteNet
+end
+
+function sendPickupPacket(entityID)
+	local remote = getPickupByteNet()
+	if remote then
+		local ok = pcall(function()
+			remote:FireServer(buffer.fromstring(pickupEncode(entityID)))
+		end)
+		if ok then
+			return
+		end
+	end
+	if loadPickupModules() and autoHeal.PickupRemote then
+		pcall(function()
+			autoHeal.PickupRemote.send(entityID)
+		end)
+	end
+end
+
+function tryPickupItem(item, essenceOnly, root)
+	local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+	local entityID = item:GetAttribute("EntityID") or (part and part:GetAttribute("EntityID"))
+	if not part or not entityID or (essenceOnly and not item.Name:find("Essence") and not part.Name:find("Essence")) then
 		return
 	end
+	local offset = root.Position - part.Position
+	if offset:Dot(offset) <= 2500 then
+		sendPickupPacket(entityID)
+	end
+end
+
+function pickupClosestItem(essenceOnly)
 	local currentCharacter, hum, root = getCharacterParts()
 	local itemsFolder = workspace:FindFirstChild("Items")
 	if not currentCharacter or not hum or hum.Health <= 0 or not root or not itemsFolder then
 		return
 	end
-	local closestPart, closestDistSq = nil, 625
-	for _, part in ipairs(itemsFolder:GetChildren()) do
-		if part:IsA("BasePart") and part:GetAttribute("EntityID") and (not essenceOnly or part.Name:find("Essence")) then
-			local offset = root.Position - part.Position
-			local distSq = offset:Dot(offset)
-			if distSq < closestDistSq then
-				closestDistSq = distSq
-				closestPart = part
+	for _, item in ipairs(itemsFolder:GetChildren()) do
+		tryPickupItem(item, essenceOnly, root)
+	end
+end
+
+function instantPickupChild(item)
+	if not state.AutoPickup and not state.PickupEssence then
+		return
+	end
+	local _, hum, root = getCharacterParts()
+	if not hum or hum.Health <= 0 or not root then
+		return
+	end
+	local essenceOnly = state.PickupEssence and not state.AutoPickup
+	tryPickupItem(item, essenceOnly, root)
+	task.delay(0.03, function()
+		if item and item.Parent and screenGui.Parent then
+			local _, delayedHum, delayedRoot = getCharacterParts()
+			if delayedHum and delayedHum.Health > 0 and delayedRoot then
+				tryPickupItem(item, essenceOnly, delayedRoot)
 			end
 		end
-	end
-	if closestPart and autoHeal.PickupModule.Try(closestPart) then
-		local entityID = closestPart:GetAttribute("EntityID")
-		if autoHeal.PickupSound then
-			autoHeal.PickupSound:Play()
-		end
-		if entityID then
-			autoHeal.PickupRemote.send(entityID)
-		end
-		animatePickupPart(closestPart)
-	end
+	end)
 end
 
 function updateAutoPickup(dt)
 	if not state.AutoPickup and not state.PickupEssence then
 		return
 	end
-	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < 0.025 then
-		return
-	end
-	autoHeal.PickupTimer = 0
 	pickupClosestItem(state.PickupEssence and not state.AutoPickup)
 end
 
@@ -3227,10 +3265,20 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 			PaddingRight = UDim.new(0, 8),
 		}, row)
 		connect(row.MouseButton1Click, function()
+			local names = getNames()
+			local allSelected = #names > 0
+			for _, itemName in ipairs(names) do
+				if not selections[itemName] then
+					allSelected = false
+					break
+				end
+			end
 			table.clear(autoHeal.DropOrder)
-			for _, itemName in ipairs(getNames()) do
-				selections[itemName] = true
-				table.insert(autoHeal.DropOrder, itemName)
+			for _, itemName in ipairs(names) do
+				selections[itemName] = not allSelected
+				if not allSelected then
+					table.insert(autoHeal.DropOrder, itemName)
+				end
 			end
 			refreshOptions()
 		end)
@@ -5629,6 +5677,16 @@ end)
 
 connect(workspace.DescendantRemoving, function(descendant)
 	untrackWorldCandidate(descendant)
+end)
+
+local itemsFolder = workspace:FindFirstChild("Items")
+if itemsFolder then
+	connect(itemsFolder.ChildAdded, instantPickupChild)
+end
+connect(workspace.ChildAdded, function(child)
+	if child.Name == "Items" then
+		connect(child.ChildAdded, instantPickupChild)
+	end
 end)
 
 connect(S.Lighting.DescendantAdded, function(descendant)
