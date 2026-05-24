@@ -59,6 +59,8 @@ local state = {
 	UncapFps = true,
 	HealthBar = true,
 	BloodFruitCounter = true,
+	AutoDisconnect = false,
+	AutoDisconnectRange = 300,
 	Fullbright = false,
 	SeeRecipe = false,
 	Dance = false,
@@ -93,6 +95,10 @@ local state = {
 	AutoHarvest = false,
 	AutoPlant = false,
 	AutoPlantItem = "Bloodfruit",
+	TweenPlantBoxes = false,
+	TweenHarvest = false,
+	BushName = "Bloodfruit",
+	TweenCheckDistance = 500,
 	AutoDrop = false,
 	AutoDropDelay = 100,
 	AutoRun = false,
@@ -129,10 +135,10 @@ local state = {
 	WorldDistance = true,
 	WorldTracers = false,
 	WorldTextSize = 12,
-	WorldMaxObjects = 90,
-	DroppedMaxObjects = 45,
-	WorldRefreshTime = 3.5,
-	WorldLabelRefreshTime = 0.35,
+	WorldMaxObjects = 70,
+	DroppedMaxObjects = 30,
+	WorldRefreshTime = 4.5,
+	WorldLabelRefreshTime = 0.5,
 	GodTreeCounter = true,
 	PerformanceGuard = true,
 }
@@ -319,6 +325,9 @@ local autoHeal = {
 	LastActualHealth = nil,
 	LastHealDrop = nil,
 	LastHealNotify = 0,
+	AutoDisconnectTimer = 0,
+	AutoDisconnectLastHealth = nil,
+	AutoDisconnectLastDamage = 0,
 	HungerPendingFood = nil,
 	HungerPendingValue = nil,
 	HungerPendingSlot = nil,
@@ -331,6 +340,7 @@ local autoHeal = {
 	PickupRemote = nil,
 	PickupSound = nil,
 	PickupTimer = 0,
+	PlayerEspTimer = 0,
 	OrbitTimer = 0,
 	OrbitLastTime = 0,
 	OrbitItems = {},
@@ -346,6 +356,9 @@ local autoHeal = {
 	ItemIDs = nil,
 	Toolbar = nil,
 	PlantItemIDs = {},
+	FarmTween = nil,
+	FarmTweenGoal = nil,
+	FarmTweenLoop = false,
 	DropTimer = 0,
 	DropIndex = 1,
 	DropPacket = nil,
@@ -353,6 +366,11 @@ local autoHeal = {
 	GodCounters = {},
 	ChestPreview = nil,
 	ChestLastPlace = 0,
+	PlantBoxRunning = false,
+	HealthBarValue = nil,
+	HealthBarMax = nil,
+	BloodFruitText = nil,
+	Notifications = {},
 	LastNoDropNotify = 0,
 	DanceTrack = nil,
 	ThemeRgbTimer = 0,
@@ -691,6 +709,23 @@ local bloodFruitCounter = themeRegister(make("TextLabel", {
 	ZIndex = 82,
 }, healthBar), "TextColor3", 0.42, 1)
 
+function layoutNotifications()
+	local yOffset = 24
+	for index = #autoHeal.Notifications, 1, -1 do
+		local toast = autoHeal.Notifications[index]
+		if not toast or not toast.Parent then
+			table.remove(autoHeal.Notifications, index)
+		end
+	end
+	for index, toast in ipairs(autoHeal.Notifications) do
+		local target = UDim2.new(0, 18, 1, -yOffset)
+		tween(toast, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Position = target,
+		})
+		yOffset += toast.AbsoluteSize.Y + 8
+	end
+end
+
 function showCustomNotification(titleText, bodyText, duration)
 	local body = bodyText or ""
 	local textLength = #tostring(titleText or "") + #tostring(body)
@@ -705,6 +740,7 @@ function showCustomNotification(titleText, bodyText, duration)
 		BorderSizePixel = 0,
 		ZIndex = 120,
 	}, screenGui)
+	table.insert(autoHeal.Notifications, 1, toast)
 	corner(toast, 14)
 	stroke(toast, Color3.fromRGB(190, 135, 255), 0.2, 1)
 
@@ -745,15 +781,20 @@ function showCustomNotification(titleText, bodyText, duration)
 		ZIndex = 121,
 	}, toast)
 
-	tween(toast, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Position = UDim2.new(0, 18, 1, -24),
-	})
+	layoutNotifications()
 	task.delay(duration or 3, function()
 		if toast and toast.Parent then
+			for index, activeToast in ipairs(autoHeal.Notifications) do
+				if activeToast == toast then
+					table.remove(autoHeal.Notifications, index)
+					break
+				end
+			end
 			tween(toast, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 				Position = UDim2.new(0, -320, 1, -24),
 				BackgroundTransparency = 1,
 			})
+			layoutNotifications()
 			task.delay(0.28, function()
 				if toast and toast.Parent then
 					toast:Destroy()
@@ -2138,7 +2179,7 @@ function updateAutoPickup(dt)
 		return
 	end
 	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < 0.00000000001 then
+	if autoHeal.PickupTimer < 0.025 then
 		return
 	end
 	autoHeal.PickupTimer = 0
@@ -2268,6 +2309,20 @@ function inventorySlotForName(itemName)
 	return ok and slot or nil
 end
 
+function inventoryQuantity(itemName)
+	if not loadAutoHealModules() then
+		return 0
+	end
+	local total = 0
+	local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
+	for _, item in pairs(inventory or {}) do
+		if item and item.name == itemName then
+			total += tonumber(item.quantity) or 0
+		end
+	end
+	return total
+end
+
 function updateAutoDrop(dt)
 	if not state.AutoDrop then
 		return
@@ -2340,6 +2395,101 @@ function selectedPlantItemID()
 	return nil
 end
 
+function bushMatches(obj)
+	return obj:IsA("Model") and (obj.Name == state.BushName or obj.Name == state.BushName .. " Bush")
+end
+
+function farmTweenTo(root, position)
+	if not position or (root.Position - position).Magnitude < 3 then
+		return
+	end
+	if autoHeal.FarmTween then
+		pcall(function()
+			autoHeal.FarmTween:Cancel()
+		end)
+	end
+	autoHeal.FarmTweenGoal = position
+	autoHeal.FarmTween = S.TweenService:Create(root, TweenInfo.new(math.max((root.Position - position).Magnitude / 16, 0.05), Enum.EasingStyle.Linear), {
+		CFrame = CFrame.new(position),
+	})
+	autoHeal.FarmTween:Play()
+	pcall(function()
+		autoHeal.FarmTween.Completed:Wait()
+	end)
+end
+
+function getHarvestBushes(root, range)
+	local bushes = {}
+	for _, obj in ipairs(workspace:GetChildren()) do
+		if bushMatches(obj) then
+			local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+			local pos = part and part.Position or obj:GetPivot().Position
+			local offset = root.Position - pos
+			local distSq = offset:Dot(offset)
+			if distSq <= range * range then
+				table.insert(bushes, { Position = pos + Vector3.new(0, 3, 0), DistanceSq = distSq })
+			end
+		end
+	end
+	table.sort(bushes, function(a, b)
+		return a.DistanceSq < b.DistanceSq
+	end)
+	return bushes
+end
+
+function nearestEmptyPlantBox(root, range)
+	local deployables = workspace:FindFirstChild("Deployables")
+	if not deployables then
+		return nil
+	end
+	local best, bestDistSq
+	for _, obj in ipairs(deployables:GetChildren()) do
+		if obj.Name == "Plant Box" and obj:IsA("Model") and not obj:FindFirstChild("Seed") then
+			local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+			local pos = part and part.Position or obj:GetPivot().Position
+			local offset = root.Position - pos
+			local distSq = offset:Dot(offset)
+			if distSq <= range * range and (not bestDistSq or distSq < bestDistSq) then
+				best = pos + Vector3.new(0, 3, 0)
+				bestDistSq = distSq
+			end
+		end
+	end
+	return best
+end
+
+function startFarmTweenLoop()
+	if autoHeal.FarmTweenLoop then
+		return
+	end
+	autoHeal.FarmTweenLoop = true
+	task.spawn(function()
+		while state.TweenPlantBoxes or state.TweenHarvest do
+			local _, hum, root = getCharacterParts()
+			if hum and hum.Health > 0 and root then
+				if state.TweenPlantBoxes then
+					farmTweenTo(root, nearestEmptyPlantBox(root, state.TweenCheckDistance))
+				end
+				if state.TweenHarvest then
+					for _, bush in ipairs(getHarvestBushes(root, state.TweenCheckDistance)) do
+						if not state.TweenHarvest then
+							break
+						end
+						local _, currentHum, currentRoot = getCharacterParts()
+						if not currentHum or currentHum.Health <= 0 or not currentRoot then
+							break
+						end
+						farmTweenTo(currentRoot, bush.Position)
+						task.wait(0.5)
+					end
+				end
+			end
+			task.wait(1)
+		end
+		autoHeal.FarmTweenLoop = false
+	end)
+end
+
 function updateAutoFarm(dt)
 	if not state.AutoHarvest and not state.AutoPlant then
 		return
@@ -2359,7 +2509,7 @@ function updateAutoFarm(dt)
 
 	if state.AutoHarvest and autoHeal.Packets.Pickup then
 		for _, obj in ipairs(workspace:GetChildren()) do
-			if obj.Name == "Bloodfruit Bush" and obj:IsA("Model") then
+			if bushMatches(obj) then
 				local entityID = obj:GetAttribute("EntityID")
 				local offset = root.Position - obj:GetPivot().Position
 				if entityID and offset:Dot(offset) <= 625 then
@@ -2391,6 +2541,94 @@ function updateAutoFarm(dt)
 			end
 		end
 	end
+end
+
+function float16(value)
+	if value == 0 then
+		return 0
+	end
+	local sign = value < 0 and 0x8000 or 0
+	value = math.abs(value)
+	local exp = math.floor(math.log(value, 2))
+	local mant = math.floor((value / 2 ^ exp) * 1024)
+	return sign + (exp + 15) * 32 + mant
+end
+
+function placeStructureEncode(buildingName, cf)
+	local x, y, z = cf:ToEulerAnglesXYZ()
+	return string.pack("<BBH", 0x01, 0xE1, #buildingName)
+		.. buildingName
+		.. string.pack("<fffHHH", cf.X, cf.Y, cf.Z, float16(x), float16(y), float16(z))
+end
+
+function sendPlantBoxPlacement(cf)
+	local remote = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
+	if not remote then
+		return false
+	end
+	local ok = pcall(function()
+		remote:FireServer(buffer.fromstring(placeStructureEncode("Plant Box", cf)))
+	end)
+	return ok
+end
+
+function placePlantBoxGrid(gridSize)
+	if autoHeal.PlantBoxRunning then
+		notify("AutoPlaceBox", "Already placing boxes.")
+		return
+	end
+	local totalBoxes = gridSize * gridSize
+	local requiredLeaves = totalBoxes * 2
+	local requiredWood = totalBoxes * 2
+	local leaves = inventoryQuantity("Leaves")
+	local wood = inventoryQuantity("Wood")
+	local buildLimit = math.min(totalBoxes, math.floor(leaves / 2), math.floor(wood / 2))
+	notify("AutoPlaceBox", string.format(
+		"Required %dx Leaves %dx Wood\n%s Leaves: %d/%d\n%s Wood: %d/%d\nCan build %d/%d boxes.",
+		requiredLeaves,
+		requiredWood,
+		leaves >= requiredLeaves and "✓" or "X",
+		leaves,
+		requiredLeaves,
+		wood >= requiredWood and "✓" or "X",
+		wood,
+		requiredWood,
+		buildLimit,
+		totalBoxes
+	))
+	if buildLimit <= 0 then
+		return
+	end
+	autoHeal.PlantBoxRunning = true
+	task.spawn(function()
+		local _, hum, root = getCharacterParts()
+		if not hum or hum.Health <= 0 or not root then
+			autoHeal.PlantBoxRunning = false
+			return
+		end
+		notify("AutoPlaceBox", string.format("Placing %d/%d Plant Boxes.", buildLimit, totalBoxes))
+		local startPos = root.Position - Vector3.new(0, 3, 0)
+		local spacing = 6.04
+		local placed = 0
+		for x = 0, gridSize - 1 do
+			for z = 0, gridSize - 1 do
+				if placed >= buildLimit then
+					autoHeal.PlantBoxRunning = false
+					notify("AutoPlaceBox", string.format("Finished %d boxes.", placed))
+					return
+				end
+				if not screenGui.Parent then
+					autoHeal.PlantBoxRunning = false
+					return
+				end
+				sendPlantBoxPlacement(CFrame.new(startPos + Vector3.new(x * spacing, 0, z * spacing)))
+				placed += 1
+				task.wait(0.3)
+			end
+		end
+		autoHeal.PlantBoxRunning = false
+		notify("AutoPlaceBox", string.format("Finished %d boxes.", placed))
+	end)
 end
 
 function isMineAuraResource(resource)
@@ -3495,6 +3733,67 @@ function updateAutoRun()
 	end
 end
 
+function nearbyPlayerName(range)
+	local _, _, root = getCharacterParts()
+	if not root then
+		return nil
+	end
+	local playersFolder = workspace:FindFirstChild("Players")
+	if playersFolder then
+		for _, model in ipairs(playersFolder:GetChildren()) do
+			if model:IsA("Model") and model.Name ~= player.Name then
+				local adornee = getAdornee(model)
+				if adornee and (adornee.Position - root.Position).Magnitude <= range then
+					return model.Name
+				end
+			end
+		end
+	end
+	for _, otherPlayer in ipairs(S.Players:GetPlayers()) do
+		if otherPlayer ~= player and otherPlayer.Character then
+			local adornee = getAdornee(otherPlayer.Character)
+			if adornee and (adornee.Position - root.Position).Magnitude <= range then
+				return otherPlayer.Name
+			end
+		end
+	end
+	return nil
+end
+
+function updateAutoDisconnect(dt)
+	if not state.AutoDisconnect then
+		autoHeal.AutoDisconnectLastHealth = nil
+		return
+	end
+	autoHeal.AutoDisconnectTimer += dt
+	if autoHeal.AutoDisconnectTimer < 0.5 then
+		return
+	end
+	autoHeal.AutoDisconnectTimer = 0
+	local health = getLocalWorkspaceHealth()
+	if not health then
+		return
+	end
+	local now = os.clock()
+	if not autoHeal.AutoDisconnectLastHealth then
+		autoHeal.AutoDisconnectLastHealth = health
+		autoHeal.AutoDisconnectLastDamage = now
+	end
+	if health < autoHeal.AutoDisconnectLastHealth - 0.5 then
+		autoHeal.AutoDisconnectLastDamage = now
+	end
+	autoHeal.AutoDisconnectLastHealth = health
+	if health >= 100 and now - autoHeal.AutoDisconnectLastDamage >= 15 then
+		local threatName = nearbyPlayerName(state.AutoDisconnectRange)
+		if threatName then
+			notify("Auto Disconnect", "Player nearby: " .. threatName .. ". Leaving safely.")
+			task.defer(function()
+				player:Kick("Auto Disconnect: player nearby after safe timer.")
+			end)
+		end
+	end
+end
+
 --// ESP
 function readableEspColor(color)
 	local brightness = color.R * 0.299 + color.G * 0.587 + color.B * 0.114
@@ -4303,20 +4602,17 @@ function updateWorldEsp()
 		end
 	end
 	local candidates = getWorldCandidates()
-	for _, ruleInfo in ipairs(enabledRules) do
-		local ruleName, enabled = ruleInfo[1], ruleInfo[2]
-		if enabled then
-			local limit = ruleName == "Dropped" and droppedLimit
-				or ruleName == "Ore" and math.huge
-				or ruleLimit
-			for _, instance in ipairs(candidates) do
-				if (ruleCounts[ruleName] or 0) >= limit then
-					break
-				end
-				if not active[instance] and matchesWorldRule(instance, ruleName) then
+	for _, instance in ipairs(candidates) do
+		if not active[instance] then
+			for _, ruleInfo in ipairs(enabledRules) do
+				local ruleName, enabled = ruleInfo[1], ruleInfo[2]
+				local limit = ruleName == "Dropped" and droppedLimit
+					or ruleLimit
+				if enabled and (ruleCounts[ruleName] or 0) < limit and matchesWorldRule(instance, ruleName) then
 					active[instance] = true
 					ensureWorldEsp(instance, ruleName)
 					ruleCounts[ruleName] = (ruleCounts[ruleName] or 0) + 1
+					break
 				end
 			end
 		end
@@ -4344,6 +4640,10 @@ perf = {
 	AverageFps = 60,
 	WorldCooldown = 3.5,
 	WorldEspCost = 0,
+	HealthTimer = 0,
+	BloodFruitTimer = 0,
+	PlayerEspTimer = 0,
+	WorldTracerTimer = 0,
 }
 local worldScanTimer = 0
 local worldLabelTimer = 0
@@ -4408,11 +4708,17 @@ function updateHealthBar()
 	local color = ratio >= 0.7 and Color3.fromRGB(95, 235, 120)
 		or ratio >= 0.4 and Color3.fromRGB(255, 212, 80)
 		or Color3.fromRGB(255, 80, 80)
-	healthText.Text = string.format("%d / %d", math.floor(health + 0.5), math.floor(maxHealth + 0.5))
-	tween(healthFill, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.fromScale(ratio, 1),
-		BackgroundColor3 = color,
-	})
+	local healthRounded = math.floor(health + 0.5)
+	local maxRounded = math.floor(maxHealth + 0.5)
+	if autoHeal.HealthBarValue ~= healthRounded or autoHeal.HealthBarMax ~= maxRounded then
+		autoHeal.HealthBarValue = healthRounded
+		autoHeal.HealthBarMax = maxRounded
+		healthText.Text = string.format("%d / %d", healthRounded, maxRounded)
+		tween(healthFill, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.fromScale(ratio, 1),
+			BackgroundColor3 = color,
+		})
+	end
 end
 
 function updateBloodFruitCounter()
@@ -4421,7 +4727,11 @@ function updateBloodFruitCounter()
 		return
 	end
 	local _, item, quantity = findBloodfruit()
-	bloodFruitCounter.Text = string.format("Blood Fruit: %d", item and quantity or 0)
+	local text = string.format("Blood Fruit: %d", item and quantity or 0)
+	if autoHeal.BloodFruitText ~= text then
+		autoHeal.BloodFruitText = text
+		bloodFruitCounter.Text = text
+	end
 end
 
 function findClimbablePartAt(position)
@@ -4617,6 +4927,16 @@ function collectPlantNames()
 	return sorted
 end
 
+function collectBushNames()
+	local names = { Bloodfruit = true }
+	for _, obj in ipairs(workspace:GetChildren()) do
+		if obj:IsA("Model") and string.find(obj.Name, "Bush", 1, true) then
+			names[(obj.Name:gsub("%s*Bush$", ""))] = true
+		end
+	end
+	return sortedKeys(names)
+end
+
 function collectInventoryNames()
 	local names = {}
 	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
@@ -4769,10 +5089,39 @@ createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant 
 		notify("Auto Plant", "Equip your Hoe ya Hoe")
 	end
 end)
-createChoiceDropdown(sections.AutoFarm, "Plant Item", collectPlantNames, function()
-	return state.AutoPlantItem
+createToggle(sections.AutoFarm, "Tween Plant Boxes", function() return state.TweenPlantBoxes end, function(v)
+	state.TweenPlantBoxes = v
+	if v then
+		notify("Tween Plant Boxes", "Make sure Auto Plant and Auto Harvest is enabled. Check Settings tab for Auto Disconnect.")
+		startFarmTweenLoop()
+	end
+end)
+createToggle(sections.AutoFarm, "Tween Harvest", function() return state.TweenHarvest end, function(v)
+	state.TweenHarvest = v
+	if v then
+		startFarmTweenLoop()
+	end
+end)
+createChoiceDropdown(sections.AutoFarm, "Bush Name", collectBushNames, function()
+	return state.BushName
 end, function(value)
+	state.BushName = value
 	state.AutoPlantItem = value
+end)
+createSlider(sections.AutoFarm, "Tween Check Distance", 50, 1000, function() return state.TweenCheckDistance end, function(v)
+	state.TweenCheckDistance = v
+end)
+createActionButton(sections.AutoFarm, "AutoPlaceBox 5x5 - 25 Total (50W/50L)", function()
+	placePlantBoxGrid(5)
+end)
+createActionButton(sections.AutoFarm, "AutoPlaceBox 10x10 - 100 Total (200W/200L)", function()
+	placePlantBoxGrid(10)
+end)
+createActionButton(sections.AutoFarm, "AutoPlaceBox 15x15 - 225 Total (450W/450L)", function()
+	placePlantBoxGrid(15)
+end)
+createActionButton(sections.AutoFarm, "AutoPlaceBox 16x16 - 256 Total (512W/512L)", function()
+	placePlantBoxGrid(16)
 end)
 
 sections.PlayerEsp = section(visualPage, "Player ESP")
@@ -4836,6 +5185,17 @@ createToggle(sections.Settings, "Uncap FPS", function() return state.UncapFps en
 end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
+createToggle(sections.Settings, "Auto Disconnect", function() return state.AutoDisconnect end, function(v)
+	state.AutoDisconnect = v
+	autoHeal.AutoDisconnectLastHealth = getLocalWorkspaceHealth()
+	autoHeal.AutoDisconnectLastDamage = os.clock()
+	if v then
+		notify("Auto Disconnect", "Leaves if HP is 100, no damage for 15s, and a player is inside the set range.")
+	end
+end)
+createSlider(sections.Settings, "Disconnect Range", 50, 1000, function() return state.AutoDisconnectRange end, function(v)
+	state.AutoDisconnectRange = v
+end)
 createToggle(sections.Settings, "God/Tree Counter", function() return state.GodTreeCounter end, function(v)
 	state.GodTreeCounter = v
 	if not v then
@@ -5157,6 +5517,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateFly()
 	updateNoclip(dt)
 	updateAutoRun()
+	updateAutoDisconnect(dt)
 	updateAutoHeal(dt)
 	updateAutoHunger(dt)
 	updateAutoPickup(dt)
@@ -5167,23 +5528,35 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateChestPreview()
 	updateDance()
 	updateStats()
-	updateHealthBar()
-	updateBloodFruitCounter()
+	perf.HealthTimer += dt
+	if perf.HealthTimer >= 0.08 then
+		perf.HealthTimer = 0
+		updateHealthBar()
+	end
+	perf.BloodFruitTimer += dt
+	if perf.BloodFruitTimer >= 1 then
+		perf.BloodFruitTimer = 0
+		updateBloodFruitCounter()
+	end
 	updateIslandRopeNotifier(dt)
 	if state.GuiThemeRgb then
 		autoHeal.ThemeRgbTimer += dt
-		if autoHeal.ThemeRgbTimer >= 0.04 then
+		if autoHeal.ThemeRgbTimer >= 0.08 then
 			autoHeal.ThemeRgbTimer = 0
 			applyGuiTheme()
 		end
 	end
 
-	if state.PlayerEsp then
-		for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
-			ensurePlayerEsp(targetPlayer)
+	perf.PlayerEspTimer += dt
+	if perf.PlayerEspTimer >= (state.PlayerTracers and 0.05 or 0.2) then
+		perf.PlayerEspTimer = 0
+		if state.PlayerEsp then
+			for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+				ensurePlayerEsp(targetPlayer)
+			end
+		else
+			clearEsp(esp.Players)
 		end
-	else
-		clearEsp(esp.Players)
 	end
 
 	worldScanTimer += dt
@@ -5196,7 +5569,9 @@ connect(S.RunService.RenderStepped, function(dt)
 		updateWorldEsp()
 	end
 
-	if state.WorldTracers then
+	perf.WorldTracerTimer += dt
+	if state.WorldTracers and perf.WorldTracerTimer >= (perf.AverageFps > 0 and perf.AverageFps < 45 and 0.066 or 0.033) then
+		perf.WorldTracerTimer = 0
 		for _, obj in pairs(esp.World) do
 			if obj.Instance and obj.Instance.Parent and obj.Tracer then
 				local adornee = getAdornee(obj.Instance)
@@ -5205,7 +5580,7 @@ connect(S.RunService.RenderStepped, function(dt)
 				end
 			end
 		end
-	elseif worldTracersLast then
+	elseif not state.WorldTracers and worldTracersLast then
 		for _, obj in pairs(esp.World) do
 			if obj.Tracer then
 				drawTracer(obj.Tracer, Vector3.zero, false)
@@ -5215,7 +5590,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	worldTracersLast = state.WorldTracers
 
 	autoHeal.WorldRainbowTimer += dt
-	if autoHeal.WorldRainbowTimer >= 0.05 then
+	if autoHeal.WorldRainbowTimer >= (perf.AverageFps > 0 and perf.AverageFps < 45 and 0.12 or 0.08) then
 		autoHeal.WorldRainbowTimer = 0
 		for _, obj in pairs(esp.World) do
 			if obj.RuleName == "Event" and obj.Instance and obj.Instance.Parent and isRainbowEvent(obj.Instance) then
