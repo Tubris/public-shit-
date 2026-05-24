@@ -369,6 +369,7 @@ local autoHeal = {
 	ChestLastPlace = 0,
 	PlantBoxPreview = {},
 	PlantBoxRunning = false,
+	PlantBoxAbort = false,
 	HealthBarValue = nil,
 	HealthBarMax = nil,
 	BloodFruitText = nil,
@@ -2072,6 +2073,9 @@ function updateAutoHunger(dt)
 	for _, foodName in ipairs(foodTypeNames) do
 		if selections.Food[foodName] then
 			local ok, slot = pcall(function()
+				if foodName == "Blood Fruit" then
+					return autoHeal.GameUtil.hasItem("Bloodfruit") or autoHeal.GameUtil.hasItem("Blood Fruit")
+				end
 				return autoHeal.GameUtil.hasItem(foodName)
 			end)
 			if ok and slot then
@@ -2607,8 +2611,9 @@ function showPlantBoxVisualizer(gridSize)
 	if not hum or hum.Health <= 0 or not root then
 		return
 	end
-	local startPos = root.Position - Vector3.new(0, 3, 0)
 	local spacing = 6.04
+	local halfOffset = (gridSize - 1) * spacing * 0.5
+	local startPos = root.Position - Vector3.new(halfOffset, 3, halfOffset)
 	for x = 0, gridSize - 1 do
 		for z = 0, gridSize - 1 do
 			local box = Instance.new("Part")
@@ -2641,9 +2646,9 @@ function placePlantBoxGrid(gridSize)
 	local requiredWood = totalBoxes * 2
 	local leaves = inventoryQuantity("Leaves")
 	local wood = inventoryQuantity("Wood")
-	local buildLimit = math.min(totalBoxes, math.floor(leaves / 2), math.floor(wood / 2))
+	local canStart = leaves >= 2 and wood >= 2
 	notify("AutoPlaceBox", string.format(
-		"Required %dx Leaves %dx Wood\n%s Leaves: %d/%d\n%s Wood: %d/%d\nCan build %d/%d boxes.",
+		"Required %dx Leaves %dx Wood\n%s Leaves: %d/%d\n%s Wood: %d/%d\nWill place until resources run out.",
 		requiredLeaves,
 		requiredWood,
 		leaves >= requiredLeaves and "✓" or "X",
@@ -2651,27 +2656,33 @@ function placePlantBoxGrid(gridSize)
 		requiredLeaves,
 		wood >= requiredWood and "✓" or "X",
 		wood,
-		requiredWood,
-		buildLimit,
-		totalBoxes
+		requiredWood
 	))
-	if buildLimit <= 0 then
+	if not canStart then
+		notify("AutoPlaceBox", "Need at least 2 Leaves and 2 Wood to place one box.")
 		return
 	end
 	autoHeal.PlantBoxRunning = true
+	autoHeal.PlantBoxAbort = false
 	task.spawn(function()
 		local _, hum, root = getCharacterParts()
 		if not hum or hum.Health <= 0 or not root then
 			autoHeal.PlantBoxRunning = false
 			return
 		end
-		notify("AutoPlaceBox", string.format("Placing %d/%d Plant Boxes.", buildLimit, totalBoxes))
-		local startPos = root.Position - Vector3.new(0, 3, 0)
+		notify("AutoPlaceBox", string.format("Placing up to %d Plant Boxes.", totalBoxes))
 		local spacing = 6.04
+		local halfOffset = (gridSize - 1) * spacing * 0.5
+		local startPos = root.Position - Vector3.new(halfOffset, 3, halfOffset)
 		local placed = 0
 		for x = 0, gridSize - 1 do
 			for z = 0, gridSize - 1 do
-				if placed >= buildLimit then
+				if autoHeal.PlantBoxAbort then
+					autoHeal.PlantBoxRunning = false
+					notify("AutoPlaceBox", string.format("Aborted after %d boxes.", placed))
+					return
+				end
+				if placed >= totalBoxes then
 					autoHeal.PlantBoxRunning = false
 					notify("AutoPlaceBox", string.format("Finished %d boxes.", placed))
 					return
@@ -5184,6 +5195,14 @@ createActionButton(sections.AutoFarm, "AutoPlaceBox 15x15 - 225 Total", function
 end)
 createActionButton(sections.AutoFarm, "AutoPlaceBox 16x16 - 256 Total", function()
 	placePlantBoxGrid(16)
+end)
+createActionButton(sections.AutoFarm, "Abort AutoPlaceBox", function()
+	if autoHeal.PlantBoxRunning then
+		autoHeal.PlantBoxAbort = true
+		notify("AutoPlaceBox", "Abort requested.")
+	else
+		notify("AutoPlaceBox", "No active placement.")
+	end
 end)
 
 sections.PlayerEsp = section(visualPage, "Player ESP")
