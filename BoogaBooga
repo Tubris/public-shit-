@@ -4368,9 +4368,119 @@ end
 function clearEsp(bucket)
 	for key, obj in pairs(bucket) do
 		if obj.Billboard then obj.Billboard:Destroy() end
+		if obj.ScreenLabel then obj.ScreenLabel:Destroy() end
 		if obj.Highlight then obj.Highlight:Destroy() end
 		if obj.Tracer then obj.Tracer:Destroy() end
 		bucket[key] = nil
+	end
+end
+
+function ensureScreenEspLabel(obj)
+	if obj.ScreenLabel then
+		return obj.ScreenLabel
+	end
+
+	obj.ScreenLabel = make("TextLabel", {
+		Name = "ControlPanelFreecamEspLabel",
+		AnchorPoint = Vector2.new(0.5, 1),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		RichText = false,
+		Text = "",
+		TextColor3 = Color3.fromRGB(245, 245, 245),
+		TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+		TextStrokeTransparency = 0.1,
+		TextWrapped = false,
+		TextScaled = false,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Visible = false,
+		ZIndex = 80,
+		Size = UDim2.fromOffset(270, 52),
+	}, screenGui)
+
+	return obj.ScreenLabel
+end
+
+function screenEspText(obj)
+	if not obj.Text then
+		return ""
+	end
+
+	local text = obj.Text.Visible == false and "" or obj.Text.Text
+	if obj.SubText and obj.SubText.Visible and obj.SubText.Text ~= "" then
+		text = text ~= "" and (text .. "\n" .. obj.SubText.Text) or obj.SubText.Text
+	elseif obj.ToolText and obj.ToolText.Visible and obj.ToolText.Text ~= "" then
+		text = text ~= "" and (text .. "\n" .. obj.ToolText.Text) or obj.ToolText.Text
+	end
+	return text
+end
+
+function drawScreenEspLabel(obj, adornee, enabled, textSize)
+	if not state.Freecam or not enabled or not camera or not adornee then
+		if obj.ScreenLabel then
+			obj.ScreenLabel.Visible = false
+		end
+		return
+	end
+
+	local point, visible = camera:WorldToViewportPoint(adornee.Position)
+	if not visible or point.Z <= 0 then
+		if obj.ScreenLabel then
+			obj.ScreenLabel.Visible = false
+		end
+		return
+	end
+
+	local label = ensureScreenEspLabel(obj)
+	label.Text = screenEspText(obj)
+	label.TextColor3 = obj.Text and obj.Text.TextColor3 or Color3.fromRGB(245, 245, 245)
+	label.TextSize = math.clamp(textSize or 12, 10, 18)
+	label.Size = UDim2.fromOffset(290, label.Text:find("\n", 1, true) and 54 or 30)
+	label.Position = UDim2.fromOffset(point.X, point.Y - 12)
+	label.Visible = label.Text ~= ""
+end
+
+function syncFreecamEspLabels()
+	if not state.Freecam then
+		if not autoHeal.FreecamEspActive then
+			return
+		end
+		autoHeal.FreecamEspActive = false
+		for targetPlayer, obj in pairs(esp.Players) do
+			if obj.ScreenLabel then
+				obj.ScreenLabel.Visible = false
+			end
+			if obj.Billboard then
+				obj.Billboard.Enabled = state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
+			end
+		end
+		for _, obj in pairs(esp.World) do
+			if obj.ScreenLabel then
+				obj.ScreenLabel.Visible = false
+			end
+			if obj.Billboard then
+				obj.Billboard.Enabled = state.WorldNames
+			end
+		end
+		return
+	end
+
+	autoHeal.FreecamEspActive = true
+	for targetPlayer, obj in pairs(esp.Players) do
+		local targetCharacter = targetPlayer.Character
+		local adornee = targetCharacter and getAdornee(targetCharacter)
+		if obj.Billboard then
+			obj.Billboard.Enabled = not state.Freecam and state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
+		end
+		drawScreenEspLabel(obj, adornee, state.PlayerEsp and (state.PlayerNames or state.PlayerTools), state.PlayerTextSize)
+	end
+
+	for instance, obj in pairs(esp.World) do
+		local adornee = instance.Parent and getAdornee(instance)
+		if obj.Billboard then
+			obj.Billboard.Enabled = not state.Freecam and state.WorldNames
+		end
+		drawScreenEspLabel(obj, adornee, state.WorldNames, state.WorldTextSize)
 	end
 end
 
@@ -4428,7 +4538,7 @@ function ensurePlayerEsp(targetPlayer)
 	obj.Billboard.MaxDistance = math.huge
 	obj.Billboard.Size = UDim2.fromOffset(230, 58)
 	obj.Highlight.Adornee = targetCharacter
-	obj.Billboard.Enabled = state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
+	obj.Billboard.Enabled = not state.Freecam and state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
 	obj.Highlight.Enabled = state.PlayerEsp and state.PlayerChams
 	obj.Text.TextSize = state.PlayerTextSize
 	obj.Text.TextColor3 = readableEspColor(teamColor)
@@ -4987,7 +5097,7 @@ function ensureWorldEsp(instance, ruleName)
 		or ruleName == "God" and UDim2.fromOffset(230, 58)
 		or UDim2.fromOffset(220, 44)
 	obj.Highlight.Adornee = instance:IsA("Model") and instance or adornee
-	obj.Billboard.Enabled = state.WorldNames
+	obj.Billboard.Enabled = not state.Freecam and state.WorldNames
 	obj.Highlight.Enabled = state.WorldChams
 	obj.Highlight.FillColor = color
 	obj.Highlight.OutlineColor = color
@@ -6107,6 +6217,7 @@ connect(S.RunService.RenderStepped, function(dt)
 			end
 		end
 	end
+	syncFreecamEspLabels()
 
 	worldLabelTimer += dt
 	local labelDelay = state.WorldLabelRefreshTime
@@ -6158,7 +6269,7 @@ connect(S.RunService.RenderStepped, function(dt)
 						obj.SubText.TextSize = math.max(10, state.WorldTextSize - 2)
 						obj.SubText.TextColor3 = textColor
 					end
-					obj.Billboard.Enabled = state.WorldNames
+					obj.Billboard.Enabled = not state.Freecam and state.WorldNames
 					obj.Highlight.Enabled = state.WorldChams
 					obj.Highlight.FillColor = color
 					obj.Highlight.OutlineColor = color
@@ -6170,6 +6281,7 @@ connect(S.RunService.RenderStepped, function(dt)
 			end
 		end
 	end
+	syncFreecamEspLabels()
 end)
 
 screenGui.Destroying:Connect(function()
