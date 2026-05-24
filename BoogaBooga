@@ -3130,7 +3130,7 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		ZIndex = 81,
 	}, overlay)
 	make("UIListLayout", {
-		SortOrder = Enum.SortOrder.Name,
+		SortOrder = Enum.SortOrder.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, options)
 
@@ -3164,6 +3164,7 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 			TextSize = 12,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 82,
+			LayoutOrder = 0,
 		}, options)
 		corner(row, 6)
 		make("UIPadding", {
@@ -3243,8 +3244,12 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		end
 		created = {}
 		addSelectAllOption()
-		for _, name in ipairs(getNames()) do
+		for index, name in ipairs(getNames()) do
 			addOption(name)
+			local row = options:FindFirstChild(name)
+			if row then
+				row.LayoutOrder = index
+			end
 		end
 		if searchBox then
 			local query = string.lower(searchBox.Text)
