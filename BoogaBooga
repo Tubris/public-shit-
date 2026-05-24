@@ -2676,6 +2676,80 @@ function inventorySlotForName(itemName)
 	return ok and slot or nil
 end
 
+function nameHasHoe(value)
+	return type(value) == "string" and string.find(string.lower(value), "hoe", 1, true) ~= nil
+end
+
+function findHoeTool(container)
+	if not container then
+		return nil
+	end
+	for _, obj in ipairs(container:GetChildren()) do
+		if obj:IsA("Tool") and nameHasHoe(obj.Name) then
+			return obj
+		end
+	end
+	return nil
+end
+
+function findInventoryHoe()
+	if not loadAutoHealModules() then
+		return nil
+	end
+	local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
+	for slot, item in pairs(inventory or {}) do
+		if item and nameHasHoe(item.name) and (tonumber(item.quantity) or 1) > 0 then
+			return slot, item.name
+		end
+	end
+	return nil
+end
+
+function tryToolbarHoe(slot, itemName)
+	if not loadFarmModules() then
+		return false
+	end
+	local toolbar = autoHeal.Toolbar
+	for _, method in ipairs({ "equip", "Equip", "select", "Select", "selectItem", "SelectItem", "selectSlot", "SelectSlot" }) do
+		if toolbar and type(toolbar[method]) == "function" then
+			local ok = pcall(toolbar[method], slot, itemName) or pcall(toolbar[method], toolbar, slot, itemName)
+			if ok then
+				return true
+			end
+		end
+	end
+	for _, packetName in ipairs({ "EquipBagItem", "EquipItem", "EquipTool", "SelectBagItem", "SelectItem", "SetSelectedBagItem", "UseBagItem" }) do
+		local packet = autoHeal.Packets and autoHeal.Packets[packetName]
+		if packet and packet.send and pcall(packet.send, slot) then
+			return true
+		end
+	end
+	return false
+end
+
+function equipHoeForAutoPlant()
+	local char, hum = getCharacterParts()
+	local equipped = findHoeTool(char)
+	if equipped then
+		return true, equipped.Name, "already equipped"
+	end
+	local backpack = player:FindFirstChildOfClass("Backpack") or player:FindFirstChild("Backpack")
+	local tool = findHoeTool(backpack)
+	if tool and hum then
+		local ok = pcall(function()
+			hum:EquipTool(tool)
+		end)
+		if ok then
+			return true, tool.Name, "equipped"
+		end
+	end
+	local slot, itemName = findInventoryHoe()
+	if slot and tryToolbarHoe(slot, itemName) then
+		return true, itemName, "selected"
+	end
+	return false, itemName
+end
+
 function inventoryQuantity(itemName)
 	if not loadAutoHealModules() then
 		return 0
@@ -6506,7 +6580,12 @@ end)
 createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant end, function(v)
 	state.AutoPlant = v
 	if v then
-		notify("Auto Plant", "Equip your Hoe ya Hoe")
+		local equipped, hoeName, status = equipHoeForAutoPlant()
+		if equipped then
+			notify("Auto Plant", string.format("%s %s.", hoeName or "Hoe", status or "equipped"))
+		else
+			notify("Auto Plant", hoeName and (hoeName .. " found. Equip your Hoe ya Hoe.") or "No Hoe found. Equip your Hoe ya Hoe.")
+		end
 	end
 end)
 createToggle(sections.AutoFarm, "Tween Plant Boxes", function() return state.TweenPlantBoxes end, function(v)
