@@ -1039,6 +1039,25 @@ function closeDropdowns()
 	syncPageScrolling()
 end
 
+function positionDropdownOverlay(overlay, headerButton, wantedHeight)
+	local mainPos = main.AbsolutePosition
+	local mainSize = main.AbsoluteSize
+	local buttonPos = headerButton.AbsolutePosition
+	local buttonSize = headerButton.AbsoluteSize
+	local width = math.max(buttonSize.X, 250)
+	local minX = mainPos.X + 8
+	local maxX = math.max(minX, mainPos.X + mainSize.X - width - 8)
+	local belowY = buttonPos.Y + buttonSize.Y + 4
+	local bottomY = mainPos.Y + mainSize.Y - 8
+	local belowSpace = bottomY - belowY
+	local aboveSpace = buttonPos.Y - mainPos.Y - 12
+	local height = math.min(wantedHeight, math.max(96, math.max(belowSpace, aboveSpace)))
+	local y = belowSpace >= math.min(wantedHeight, 96) and belowY or math.max(mainPos.Y + 8, buttonPos.Y - height - 4)
+
+	overlay.Position = UDim2.fromOffset(math.clamp(buttonPos.X, minX, maxX), y)
+	overlay.Size = UDim2.fromOffset(width, height)
+end
+
 local content = make("Frame", {
 	Position = UDim2.new(0, 0, 0, 102),
 	Size = UDim2.new(1, 0, 1, -114),
@@ -2971,24 +2990,48 @@ function auraEntityID(instance)
 	return nil
 end
 
-function addAuraCandidate(list, model, auraType)
+function addAuraCandidate(list, model, auraType, seen)
 	if not model or (not model:IsA("Model") and not model:IsA("BasePart")) then
 		return
 	end
-	if auraEntityID(model) then
+	local entityID = auraEntityID(model)
+	if entityID and (not seen or not seen[entityID]) and getAdornee(model) then
+		if seen then
+			seen[entityID] = true
+		end
 		table.insert(list, { Model = model, Type = auraType })
+	end
+end
+
+function addAuraFolderCandidates(list, folder, auraType, seen, excludeLocalPlayer)
+	if not folder then
+		return
+	end
+	local localModel = folder:FindFirstChild(player.Name)
+	for _, obj in ipairs(folder:GetDescendants()) do
+		if (obj:IsA("Model") or obj:IsA("BasePart"))
+			and (not excludeLocalPlayer or (obj ~= localModel and not (localModel and obj:IsDescendantOf(localModel)))) then
+			addAuraCandidate(list, obj, auraType, seen)
+		end
 	end
 end
 
 function refreshAuraCandidates()
 	local candidates = {}
+	local seen = {}
 	if state.WeaponAura then
 		local playersFolder = workspace:FindFirstChild("Players")
 		if playersFolder then
 			for _, model in ipairs(playersFolder:GetChildren()) do
 				if model.Name ~= player.Name and model ~= character then
-					addAuraCandidate(candidates, model, "Weapon")
+					addAuraCandidate(candidates, model, "Weapon", seen)
 				end
+			end
+			addAuraFolderCandidates(candidates, playersFolder, "Weapon", seen, true)
+		end
+		for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+			if targetPlayer ~= player and targetPlayer.Character then
+				addAuraCandidate(candidates, targetPlayer.Character, "Weapon", seen)
 			end
 		end
 	end
@@ -2996,34 +3039,35 @@ function refreshAuraCandidates()
 		local crittersFolder = workspace:FindFirstChild("Critters")
 		if crittersFolder then
 			for _, model in ipairs(crittersFolder:GetChildren()) do
-					addAuraCandidate(candidates, model, "Mob")
+				addAuraCandidate(candidates, model, "Mob", seen)
 			end
+			addAuraFolderCandidates(candidates, crittersFolder, "Mob", seen, false)
 		end
 	end
 	if state.MineAura then
 		local resourcesFolder = workspace:FindFirstChild("Resources")
 		if resourcesFolder then
 			for _, model in ipairs(resourcesFolder:GetChildren()) do
-				addAuraCandidate(candidates, model, "Mine")
+				addAuraCandidate(candidates, model, "Mine", seen)
 			end
 		end
-		addAuraCandidate(candidates, workspace:FindFirstChild("Treasure Chest"), "Mine")
-		addAuraCandidate(candidates, workspace:FindFirstChild("TreasureChest"), "Mine")
+		addAuraCandidate(candidates, workspace:FindFirstChild("Treasure Chest"), "Mine", seen)
+		addAuraCandidate(candidates, workspace:FindFirstChild("TreasureChest"), "Mine", seen)
 		local moundsFolder = workspace:FindFirstChild("Mounds")
 		if moundsFolder then
 			for _, model in ipairs(moundsFolder:GetChildren()) do
-				addAuraCandidate(candidates, model, "Mine")
+				addAuraCandidate(candidates, model, "Mine", seen)
 			end
 		end
 		local climbableFolder = workspace:FindFirstChild("ClimbableRegions")
 		if climbableFolder then
 			for _, part in ipairs(climbableFolder:GetChildren()) do
-				addAuraCandidate(candidates, part, "Mine")
+				addAuraCandidate(candidates, part, "Mine", seen)
 			end
 		end
 		for _, model in ipairs(workspace:GetChildren()) do
 			if isMeteorCore(model) then
-				addAuraCandidate(candidates, model, "Mine")
+				addAuraCandidate(candidates, model, "Mine", seen)
 			end
 		end
 	end
@@ -3079,8 +3123,12 @@ function updatePlayerAuraHitboxes()
 	if not playersFolder then
 		return
 	end
-	for _, model in ipairs(playersFolder:GetChildren()) do
-		if model:IsA("Model") and model.Name ~= player.Name then
+	local localModel = playersFolder:FindFirstChild(player.Name)
+	for _, model in ipairs(playersFolder:GetDescendants()) do
+		if model:IsA("Model")
+			and model.Name ~= player.Name
+			and model ~= localModel
+			and not (localModel and model:IsDescendantOf(localModel)) then
 			local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 			if part and part:IsA("BasePart") then
 				if not autoHeal.PlayerHitboxes[part] then
@@ -3611,8 +3659,7 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 			openDropdowns += 1
 			dropdownBlocker.Visible = true
 			syncPageScrolling()
-			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
-			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, withSearch and 250 or 220)
+			positionDropdownOverlay(overlay, headerButton, withSearch and 250 or 220)
 			refreshOptions()
 			if searchBox then
 				searchBox:CaptureFocus()
@@ -3667,10 +3714,21 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		PaddingTop = UDim.new(0, 6),
 		PaddingBottom = UDim.new(0, 6),
 	}, overlay)
+
+	local options = make("ScrollingFrame", {
+		Size = UDim2.fromScale(1, 1),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Color3.fromRGB(220, 220, 225),
+		ZIndex = 81,
+	}, overlay)
 	make("UIListLayout", {
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Padding = UDim.new(0, 4),
-	}, overlay)
+	}, options)
 
 	local expanded = false
 	local rows = {}
@@ -3693,7 +3751,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 82,
 				LayoutOrder = index,
-			}, overlay)
+			}, options)
 			corner(row, 6)
 			make("UIPadding", {
 				PaddingLeft = UDim.new(0, 8),
@@ -3738,8 +3796,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 			openDropdowns += 1
 			dropdownBlocker.Visible = true
 			syncPageScrolling()
-			overlay.Position = UDim2.fromOffset(headerButton.AbsolutePosition.X, headerButton.AbsolutePosition.Y + headerButton.AbsoluteSize.Y + 4)
-			overlay.Size = UDim2.new(0, math.max(headerButton.AbsoluteSize.X, 250), 0, math.min(#currentChoices() * 30 + 12, 220))
+			positionDropdownOverlay(overlay, headerButton, math.min(#currentChoices() * 30 + 12, 220))
 		end
 		redraw()
 	end)
@@ -4385,7 +4442,7 @@ function ensureScreenEspLabel(obj)
 		AnchorPoint = Vector2.new(0.5, 1),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
-		RichText = false,
+		RichText = true,
 		Text = "",
 		TextColor3 = Color3.fromRGB(245, 245, 245),
 		TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
@@ -4401,16 +4458,28 @@ function ensureScreenEspLabel(obj)
 	return obj.ScreenLabel
 end
 
+function colorHex(color)
+	return string.format("#%02X%02X%02X",
+		math.floor(math.clamp(color.R * 255, 0, 255)),
+		math.floor(math.clamp(color.G * 255, 0, 255)),
+		math.floor(math.clamp(color.B * 255, 0, 255))
+	)
+end
+
+function richLine(text, color)
+	return string.format('<font color="%s">%s</font>', colorHex(color), tostring(text):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+end
+
 function screenEspText(obj)
 	if not obj.Text then
 		return ""
 	end
 
-	local text = obj.Text.Visible == false and "" or obj.Text.Text
+	local text = obj.Text.Visible == false and "" or richLine(obj.Text.Text, obj.Text.TextColor3)
 	if obj.SubText and obj.SubText.Visible and obj.SubText.Text ~= "" then
-		text = text ~= "" and (text .. "\n" .. obj.SubText.Text) or obj.SubText.Text
+		text = text ~= "" and (text .. "\n" .. richLine(obj.SubText.Text, obj.SubText.TextColor3)) or richLine(obj.SubText.Text, obj.SubText.TextColor3)
 	elseif obj.ToolText and obj.ToolText.Visible and obj.ToolText.Text ~= "" then
-		text = text ~= "" and (text .. "\n" .. obj.ToolText.Text) or obj.ToolText.Text
+		text = text ~= "" and (text .. "\n" .. richLine(obj.ToolText.Text, obj.ToolText.TextColor3)) or richLine(obj.ToolText.Text, obj.ToolText.TextColor3)
 	end
 	return text
 end
@@ -4435,7 +4504,7 @@ function drawScreenEspLabel(obj, adornee, enabled, textSize)
 	label.Text = screenEspText(obj)
 	label.TextColor3 = obj.Text and obj.Text.TextColor3 or Color3.fromRGB(245, 245, 245)
 	label.TextSize = math.clamp(textSize or 12, 10, 18)
-	label.Size = UDim2.fromOffset(290, label.Text:find("\n", 1, true) and 54 or 30)
+	label.Size = UDim2.fromOffset(330, label.Text:find("\n", 1, true) and 54 or 30)
 	label.Position = UDim2.fromOffset(point.X, point.Y - 12)
 	label.Visible = label.Text ~= ""
 end
