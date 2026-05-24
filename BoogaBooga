@@ -236,7 +236,7 @@ local selections = {
 	},
 }
 
-local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Jelly", "Blood Fruit" }
+local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Strawberry", "Jelly", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
 local oreFallbackColors = {
@@ -426,6 +426,7 @@ local autoHeal = {
 	RopeTimer = 0,
 	RopeTouching = {},
 	RopeStates = {},
+	RopeRespawns = {},
 	ItemIDs = nil,
 	Toolbar = nil,
 	PlantItemIDs = {},
@@ -455,6 +456,58 @@ local autoHeal = {
 local recipeView = {}
 local themeTargets = {}
 local themeRedraws = {}
+toggleDescriptions = {
+	["Walk Speed"] = "Keeps your walk speed at the slider value.",
+	["Jump Power"] = "Keeps your jump power at the slider value.",
+	["No Slip"] = "Raises slope angle so steep terrain is easier to climb.",
+	Noclip = "Lets your character pass through parts and terrain.",
+	["Infinite Camera Zoom"] = "Removes the normal camera zoom limit.",
+	["Fly Enabled"] = "Lets you fly with movement keys at the fly speed value.",
+	["Weapon Aura"] = "Attacks nearby players within 9 studs.",
+	["Mine Aura"] = "Attacks nearby resources, gods, ropes, and mineable objects.",
+	["Mob Aura"] = "Attacks nearby critters in workspace.Critters.",
+	["Chest Place"] = "Shows a chest preview and places a chest with left click.",
+	["Auto Heal"] = "Uses Blood Fruit when your HP is under the heal slider.",
+	["Heal Fallback"] = "Uses any food item if no Blood Fruit is available.",
+	["Auto Hunger"] = "Eats selected foods when hunger is under the slider.",
+	["Auto Drop"] = "Drops selected inventory items at the selected delay.",
+	["Auto Pickup"] = "Picks up nearby selected items and chest contents.",
+	["Pickup Essence"] = "Only picks up nearby Essence when Auto Pickup is off.",
+	["Item Orbit"] = "Pulls nearby items into an orbit around you.",
+	["Auto Harvest"] = "Harvests selected bushes near you.",
+	["Auto Plant"] = "Plants selected fruit in nearby empty plant boxes.",
+	["Tween Plant Boxes"] = "Tweens to empty plant boxes for farming.",
+	["Tween Harvest"] = "Tweens to selected bushes for harvesting.",
+	["Plant Box Visualizer"] = "Shows where plant boxes would place without placing.",
+	Enabled = "Turns player ESP on.",
+	Names = "Shows ESP names.",
+	Chams = "Shows ESP highlights through walls.",
+	Distance = "Adds distance to ESP labels.",
+	Tracers = "Draws tracer lines to ESP targets.",
+	Tools = "Shows equipped player tools under ESP names.",
+	["Zay Mode"] = "Makes player ESP colors cycle RGB.",
+	["Dropped Items"] = "Shows dropped item ESP.",
+	Fullbright = "Removes darkness, fog, and shadows.",
+	Ores = "Shows ore/resource ESP.",
+	Entities = "Shows entity ESP. Use the dropdown to choose types.",
+	["Mob ESP"] = "Shows critters from workspace.Critters.",
+	Events = "Shows event ESP like Treasure Chest and Meteor Core.",
+	["God ESP"] = "Shows gods, Ancient Tree, health, and timers.",
+	["Portal ESP"] = "Shows portal ESP.",
+	["Ant Hill ESP"] = "Shows ant hill/mound ESP.",
+	["Totem ESP"] = "Shows tribe totem ESP with health.",
+	["Performance Stats"] = "Shows FPS, player count, and ping.",
+	["Uncap FPS"] = "Attempts to uncap FPS with executor support.",
+	["Health Bar"] = "Shows the custom health bar.",
+	["Blood Fruit Count"] = "Shows your Blood Fruit amount above the health bar.",
+	["Auto Disconnect"] = "Disconnects if a player is within the selected range.",
+	["God/Tree Counter"] = "Shows break-time and respawn timers for gods/tree.",
+	["Island Rope Notifier"] = "Notifies when a player uses a rope, breaks it, and shows timer till respawn.",
+	["Auto Load Config"] = "Loads the selected config automatically next execute.",
+	Dance = "Loops the selected dance emote.",
+	["See Recipe"] = "Shows recipes as level 100 while blocking too-low crafts.",
+	Freecam = "Toggles freecam with scroll-wheel speed control.",
+}
 local danceEmotes = {
 	["Irish Jig"] = 3333432454,
 	Pushing = 4555808220,
@@ -805,23 +858,23 @@ end
 
 function showCustomNotification(titleText, bodyText, duration)
 	local body = bodyText or ""
-	local textLength = #tostring(titleText or "") + #tostring(body)
 	local lineCount = select(2, tostring(body):gsub("\n", "")) + 1
-	local wrapRows = math.ceil(math.max(#tostring(body), 1) / 42)
-	local toastHeight = math.clamp(46 + math.max(lineCount, wrapRows) * 15, 58, 118)
+	local wrapRows = math.ceil(math.max(#tostring(body), 1) / 46)
+	local bodyRows = math.max(lineCount, wrapRows)
+	local toastHeight = math.clamp(34 + bodyRows * 15, bodyRows > 1 and 64 or 48, 108)
 	local toast = make("Frame", {
 		Name = "ChubbisonNotification",
 		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, -320, 1, -24),
-		Size = UDim2.new(0, 300, 0, toastHeight),
-		BackgroundColor3 = Color3.fromRGB(12, 8, 28),
-		BackgroundTransparency = 0.02,
+		Position = UDim2.new(0, -300, 1, -24),
+		Size = UDim2.new(0, 292, 0, toastHeight),
+		BackgroundColor3 = Color3.fromRGB(8, 6, 20),
+		BackgroundTransparency = 0.04,
 		BorderSizePixel = 0,
 		ZIndex = 120,
 	}, screenGui)
 	table.insert(autoHeal.Notifications, 1, toast)
-	corner(toast, 14)
-	stroke(toast, Color3.fromRGB(190, 135, 255), 0.2, 1)
+	corner(toast, 12)
+	stroke(toast, Color3.fromRGB(170, 110, 255), 0.28, 1)
 
 	themeGradient(make("UIGradient", {
 		Color = ColorSequence.new({
@@ -833,30 +886,32 @@ function showCustomNotification(titleText, bodyText, duration)
 	}, toast))
 
 	make("TextLabel", {
-		Position = UDim2.new(0, 14, 0, 7),
-		Size = UDim2.new(1, -28, 0, 18),
+		Position = UDim2.new(0, 14, 0, 8),
+		Size = UDim2.new(1, -28, 0, 15),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = titleText,
 		TextColor3 = Color3.fromRGB(250, 245, 255),
-		TextSize = 13,
+		TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
-		TextWrapped = true,
+		TextWrapped = false,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		ZIndex = 121,
 	}, toast)
 
 	make("TextLabel", {
-		Position = UDim2.new(0, 14, 0, 28),
-		Size = UDim2.new(1, -28, 1, -36),
+		Position = UDim2.new(0, 14, 0, 25),
+		Size = UDim2.new(1, -28, 1, -30),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.Gotham,
 		Text = body,
-		TextColor3 = Color3.fromRGB(215, 185, 255),
-		TextSize = 12,
+		TextColor3 = Color3.fromRGB(225, 205, 255),
+		TextSize = 11,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextWrapped = true,
+		TextTruncate = Enum.TextTruncate.None,
 		ZIndex = 121,
 	}, toast)
 
@@ -870,7 +925,7 @@ function showCustomNotification(titleText, bodyText, duration)
 				end
 			end
 			tween(toast, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-				Position = UDim2.new(0, -320, 1, -24),
+				Position = UDim2.new(0, -300, 1, -24),
 				BackgroundTransparency = 1,
 			})
 			layoutNotifications()
@@ -1274,7 +1329,11 @@ function createToggle(parent, label, getValue, setValue)
 			lockedFeatureMessage()
 			return
 		end
-		setValue(not getValue())
+		local nextValue = not getValue()
+		setValue(nextValue)
+		if nextValue and toggleDescriptions[label] then
+			notify(label, toggleDescriptions[label])
+		end
 		redraw()
 	end)
 
@@ -1433,6 +1492,7 @@ local awaitingKeybindFor
 local keybindButtons = {}
 local freecamToggleRedraw
 local autoPickupToggleRedraw
+autoDropToggleRedraw = nil
 
 function keyName(keyCode)
 	return keyCode.Name:gsub("Left", "L"):gsub("Right", "R")
@@ -2669,10 +2729,11 @@ function updateAutoDrop(dt)
 		end
 	end
 	if #names == 0 then
-		if os.clock() - autoHeal.LastNoDropNotify > 8 then
-			notify("Auto Drop", "No selected inventory item found.")
-			autoHeal.LastNoDropNotify = os.clock()
-		end
+		notify("Auto Drop", "Finished dropping selected items.")
+		state.AutoDrop = false
+		autoHeal.DropTimer = 0
+		autoHeal.DropIndex = 1
+		if autoDropToggleRedraw then autoDropToggleRedraw() end
 		return
 	end
 	if autoHeal.DropIndex > #names then
@@ -3328,13 +3389,15 @@ function mobAuraTargets(rootPosition)
 		return targets
 	end
 	for _, critter in ipairs(crittersFolder:GetChildren()) do
-		local part = critter:IsA("BasePart") and critter or critter.PrimaryPart or critter:FindFirstChildWhichIsA("BasePart", true)
 		local entityID = auraEntityID(critter)
-		if part and entityID then
-			local offset = rootPosition - part.Position
-			local distanceSq = offset:Dot(offset)
-			if distanceSq <= 1600 then
-				table.insert(targets, { EntityID = entityID, Position = part.Position, DistanceSq = distanceSq })
+		if entityID then
+			local position = critter:IsA("Model") and critter:GetPivot().Position
+				or critter:IsA("BasePart") and critter.Position
+				or (getAdornee(critter) and getAdornee(critter).Position)
+			local offset = position and rootPosition - position
+			local distanceSq = offset and offset:Dot(offset)
+			if distanceSq and distanceSq <= 1600 then
+				table.insert(targets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
 			end
 		end
 	end
@@ -5049,11 +5112,15 @@ function godCounterText(instance, health)
 end
 
 function godRespawnSeconds(name)
+	if name == "Crystal Guardian" then
+		return 600
+	end
 	return name == "Ancient Tree" and 5000 or 1000
 end
 
 function formatRespawnMinutes(seconds)
-	return string.format("%.1fm", math.max(0, seconds) / 60)
+	seconds = math.max(0, math.floor(seconds + 0.5))
+	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
 function ensureGodRespawnData(name, color)
@@ -5619,6 +5686,96 @@ function updateBloodFruitCounter()
 	end
 end
 
+function skyRopeTargets()
+	return {
+		Ancient = { Name = "Ancient Tree", RopePosition = Vector3.new(-489.0001220703125, 223.91123962402344, -877.7122802734375) },
+		Crystal = { Name = "Crystal", RopePosition = Vector3.new(-516.9925537109375, 80.73329162597656, -607.0921630859375) },
+	}
+end
+
+function findSkyRope(target)
+	local resources = workspace:FindFirstChild("Resources")
+	if not resources then
+		return nil
+	end
+	local best, bestDistance
+	for _, model in ipairs(resources:GetChildren()) do
+		if model:IsA("Model") and model.Name == "Sky Rope" then
+			local ropePart = model:FindFirstChild("Rope", true)
+			if ropePart and ropePart:IsA("BasePart") then
+				local distance = (ropePart.Position - target.RopePosition).Magnitude
+				if distance <= 20 and (not bestDistance or distance < bestDistance) then
+					best = model
+					bestDistance = distance
+				end
+			end
+		end
+	end
+	return best
+end
+
+function ropePart(model, partName)
+	local part = model and model:FindFirstChild(partName, true)
+	return part and part:IsA("BasePart") and part or nil
+end
+
+function ropeHealth(model)
+	local health = model and model:FindFirstChild("Health", true)
+	return health and health:IsA("IntValue") and health.Value or nil
+end
+
+function nearestPlayerNameTo(position)
+	local playersFolder = workspace:FindFirstChild("Players")
+	if not playersFolder then
+		return "Unknown"
+	end
+	local bestName = "Unknown"
+	local bestDistance = 100
+	for _, model in ipairs(playersFolder:GetChildren()) do
+		if model:IsA("Model") then
+			local adornee = getAdornee(model)
+			if adornee then
+				local distance = (adornee.Position - position).Magnitude
+				if distance <= bestDistance then
+					bestDistance = distance
+					bestName = model.Name
+				end
+			end
+		end
+	end
+	return bestName
+end
+
+function ensureRopeRespawnData(key, ropeName)
+	autoHeal.RopeRespawns[key] = autoHeal.RopeRespawns[key] or {}
+	local data = autoHeal.RopeRespawns[key]
+	if not data.Marker or not data.Marker.Parent then
+		data.Marker = make("Part", {
+			Name = "ChubbisonRopeRespawn_" .. key,
+			Anchored = true,
+			CanCollide = false,
+			CanTouch = false,
+			CanQuery = false,
+			Transparency = 1,
+			Size = Vector3.new(1, 1, 1),
+		}, workspace)
+	end
+	if not data.Billboard or not data.Billboard.Parent then
+		data.Billboard, data.Text = createBillboard(ropeName .. " Rope", Color3.fromRGB(170, 120, 255), state.WorldTextSize, false)
+		data.Billboard.Parent = screenGui
+		data.Billboard.Adornee = data.Marker
+	end
+	return data
+end
+
+function clearRopeRespawnMarkers()
+	for key, data in pairs(autoHeal.RopeRespawns) do
+		if data.Billboard then data.Billboard:Destroy() end
+		if data.Marker then data.Marker:Destroy() end
+		autoHeal.RopeRespawns[key] = nil
+	end
+end
+
 function findClimbablePartAt(position)
 	local folder = workspace:FindFirstChild("ClimbableRegions")
 	if not folder then
@@ -5641,6 +5798,11 @@ end
 function updateIslandRopeNotifier(dt)
 	if not state.IslandRopeNotifier then
 		table.clear(autoHeal.RopeTouching)
+		for _, data in pairs(autoHeal.RopeRespawns) do
+			if data.Billboard then
+				data.Billboard.Enabled = false
+			end
+		end
 		return
 	end
 	autoHeal.RopeTimer += dt
@@ -5648,17 +5810,58 @@ function updateIslandRopeNotifier(dt)
 		return
 	end
 	autoHeal.RopeTimer = 0
-	local ropes = {
-		Ancient = { Name = "Ancient Tree", Part = findClimbablePartAt(Vector3.new(-489.2002258300781, 234.5003662109375, -888.9686889648438)) },
-		Crystal = { Name = "Crystal", Part = findClimbablePartAt(Vector3.new(-518, 80.5, -607)) },
-	}
+	local now = os.clock()
+	local ropes = skyRopeTargets()
 	for key, rope in pairs(ropes) do
-		local exists = rope.Part ~= nil
+		rope.Model = findSkyRope(rope)
+		rope.RopePart = ropePart(rope.Model, "Rope")
+		rope.AttackPart = ropePart(rope.Model, "Part") or rope.RopePart
+		rope.Health = ropeHealth(rope.Model)
+		local exists = rope.Model ~= nil
 		if autoHeal.RopeStates[key] == nil then
-			autoHeal.RopeStates[key] = exists
-		elseif autoHeal.RopeStates[key] ~= exists then
-			autoHeal.RopeStates[key] = exists
+			autoHeal.RopeStates[key] = { Exists = exists, Health = rope.Health, LastBreaker = nil, LastBreakNotify = 0 }
+		elseif autoHeal.RopeStates[key].Exists ~= exists then
+			autoHeal.RopeStates[key].Exists = exists
 			notify("Island Rope", rope.Name .. " Island Rope " .. (exists and "Respawned" or "Destroyed"))
+		end
+		local stateData = autoHeal.RopeStates[key]
+		if stateData then
+			if exists then
+				local respawn = autoHeal.RopeRespawns[key]
+				if respawn and respawn.Billboard then
+					respawn.Billboard.Enabled = false
+				end
+				if rope.Health and stateData.Health and rope.Health < stateData.Health then
+					local attackPosition = rope.AttackPart and rope.AttackPart.Position or rope.RopePart and rope.RopePart.Position
+					if attackPosition then
+						local breaker = nearestPlayerNameTo(attackPosition)
+						if breaker ~= player.Name and breaker ~= "Unknown" and (breaker ~= stateData.LastBreaker or now - (stateData.LastBreakNotify or 0) >= 60) then
+							stateData.LastBreaker = breaker
+							stateData.LastBreakNotify = now
+							notify("Island Rope", "Player " .. breaker .. " Is Breaking " .. rope.Name .. " Rope")
+						end
+					end
+				end
+				stateData.Health = rope.Health
+				stateData.MissingSince = nil
+				if rope.AttackPart then
+					stateData.LastPosition = rope.AttackPart.Position
+				elseif rope.RopePart then
+					stateData.LastPosition = rope.RopePart.Position
+				end
+			else
+				if not stateData.MissingSince then
+					stateData.MissingSince = now
+				end
+				local position = stateData.LastPosition or rope.RopePosition
+				local respawn = ensureRopeRespawnData(key, rope.Name)
+				respawn.Marker.CFrame = CFrame.new(position)
+				respawn.Billboard.Enabled = true
+				respawn.Billboard.Size = UDim2.fromOffset(250, 44)
+				respawn.Text.TextColor3 = Color3.fromRGB(210, 175, 255)
+				respawn.Text.TextSize = state.WorldTextSize
+				respawn.Text.Text = rope.Name .. " Rope Respawn: " .. formatRespawnMinutes(360 - (now - stateData.MissingSince))
+			end
 		end
 	end
 	local playersFolder = workspace:FindFirstChild("Players")
@@ -5671,7 +5874,7 @@ function updateIslandRopeNotifier(dt)
 			local adornee = getAdornee(model)
 			if adornee then
 				for key, rope in pairs(ropes) do
-					if rope.Part and pointInsidePart(rope.Part, adornee.Position) then
+					if rope.RopePart and pointInsidePart(rope.RopePart, adornee.Position) then
 						local id = model.Name .. ":" .. key
 						active[id] = true
 						if not autoHeal.RopeTouching[id] then
@@ -6037,7 +6240,7 @@ function saveConfigNamed(name, overwrite)
 	name = cleanConfigName(name)
 	local path = configPath(name)
 	if not overwrite and isfile(path) then
-		notify("Config", "Config exists. Use Rewrite Config.")
+		notify("Config", "Config exists. Use Overwrite Config.")
 		return false
 	end
 	local ok, encoded = pcall(function()
@@ -6233,7 +6436,7 @@ end)
 createFilterDropdown(sections.Healing, "Food Types", collectFoodNames, selections.Food, true)
 
 sections.AutoDrop = section(autoPage, "Auto Drop")
-createToggle(sections.AutoDrop, "Auto Drop", function() return state.AutoDrop end, function(v)
+autoDropToggleRedraw = createToggle(sections.AutoDrop, "Auto Drop", function() return state.AutoDrop end, function(v)
 	state.AutoDrop = v
 	autoHeal.DropTimer = 0
 	autoHeal.DropIndex = 1
@@ -6324,7 +6527,6 @@ createToggle(sections.PlayerEsp, "Distance", function() return state.PlayerDista
 createToggle(sections.PlayerEsp, "Tracers", function() return state.PlayerTracers end, function(v) state.PlayerTracers = v end)
 createToggle(sections.PlayerEsp, "Tools", function() return state.PlayerTools end, function(v) state.PlayerTools = v end)
 createToggle(sections.PlayerEsp, "Zay Mode", function() return state.PlayerZayMode end, function(v) state.PlayerZayMode = v end)
-createToggle(sections.PlayerEsp, "Island Rope Notifier", function() return state.IslandRopeNotifier end, function(v) state.IslandRopeNotifier = v end)
 createToggle(sections.PlayerEsp, "Dropped Items", function() return state.DroppedEsp end, function(v) state.DroppedEsp = v; updateWorldEsp() end)
 createToggle(sections.PlayerEsp, "Fullbright", function() return state.Fullbright end, setFullbright)
 createSlider(sections.PlayerEsp, "Text Size", 10, 28, function() return state.PlayerTextSize end, function(v) state.PlayerTextSize = v end)
@@ -6409,6 +6611,7 @@ createToggle(sections.Settings, "God/Tree Counter", function() return state.GodT
 		autoHeal.GodCounters = {}
 	end
 end)
+createToggle(sections.Settings, "Island Rope Notifier", function() return state.IslandRopeNotifier end, function(v) state.IslandRopeNotifier = v end)
 createThemePicker(sections.Settings)
 
 sections.Config = section(settingsPage, "Config")
@@ -6435,7 +6638,7 @@ createActionButton(sections.Config, "Save Config", function()
 		configDropdownRedraw()
 	end
 end)
-createActionButton(sections.Config, "Rewrite Config", function()
+createActionButton(sections.Config, "Overwrite Config", function()
 	if rewriteConfig() and configDropdownRedraw then
 		configDropdownRedraw()
 	end
@@ -6962,6 +7165,7 @@ screenGui.Destroying:Connect(function()
 	restorePlayerAuraHitboxes()
 	clearPlantBoxVisualizer()
 	clearGodRespawnMarkers()
+	clearRopeRespawnMarkers()
 	setCoreChatVisible(defaults.ChatEnabled)
 	workspace.Gravity = defaults.Gravity
 	player.CameraMaxZoomDistance = defaults.CameraMaxZoom
