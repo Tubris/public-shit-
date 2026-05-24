@@ -180,6 +180,9 @@ local state = {
 	WorldLabelRefreshTime = 0.5,
 	GodTreeCounter = true,
 	PerformanceGuard = true,
+	AutoLoadConfig = false,
+	ConfigName = "Default",
+	SelectedConfig = "Default",
 }
 
 if isVoidWorld() then
@@ -1525,6 +1528,47 @@ function createActionButton(parent, label, callback)
 		callback()
 	end)
 	return button
+end
+
+function createTextInput(parent, label, getValue, setValue)
+	local row = make("Frame", {
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+	}, parent)
+	make("TextLabel", {
+		Size = UDim2.new(0.36, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = label,
+		TextColor3 = Color3.fromRGB(255, 248, 255),
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	local input = make("TextBox", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.new(0.62, 0, 0, 28),
+		BackgroundColor3 = Color3.fromRGB(20, 20, 23),
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = "Config name",
+		PlaceholderColor3 = Color3.fromRGB(145, 140, 155),
+		Text = tostring(getValue() or ""),
+		TextColor3 = Color3.fromRGB(245, 245, 245),
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	corner(input, 7)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+	}, input)
+	connect(input.FocusLost, function()
+		setValue(input.Text)
+		input.Text = tostring(getValue() or "")
+	end)
+	return input
 end
 
 function notify(titleText, bodyText)
@@ -5802,6 +5846,297 @@ function collectInventoryNames()
 	return sortedKeys(names)
 end
 
+function canUseConfigFiles()
+	return typeof(writefile) == "function" and typeof(readfile) == "function" and typeof(isfile) == "function"
+end
+
+function configIndexPath()
+	return "ChubbisonMeConfigs/index.json"
+end
+
+function cleanConfigName(name)
+	name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if name == "" then
+		name = "Default"
+	end
+	return name:sub(1, 32)
+end
+
+function configFileName(name)
+	return cleanConfigName(name):gsub("[^%w _%-]", "_")
+end
+
+function configPath(name)
+	return "ChubbisonMeConfigs/" .. configFileName(name) .. ".json"
+end
+
+function ensureConfigFolder()
+	if typeof(makefolder) == "function" and (typeof(isfolder) ~= "function" or not isfolder("ChubbisonMeConfigs")) then
+		pcall(makefolder, "ChubbisonMeConfigs")
+	end
+end
+
+function readConfigIndex()
+	if not canUseConfigFiles() or not isfile(configIndexPath()) then
+		return { Configs = {}, SelectedConfig = state.SelectedConfig, AutoLoadConfig = state.AutoLoadConfig }
+	end
+	local ok, data = pcall(function()
+		return S.HttpService:JSONDecode(readfile(configIndexPath()))
+	end)
+	if ok and type(data) == "table" then
+		data.Configs = type(data.Configs) == "table" and data.Configs or {}
+		return data
+	end
+	return { Configs = {}, SelectedConfig = state.SelectedConfig, AutoLoadConfig = state.AutoLoadConfig }
+end
+
+function writeConfigIndex(index)
+	if not canUseConfigFiles() then
+		return false
+	end
+	ensureConfigFolder()
+	index.SelectedConfig = state.SelectedConfig
+	index.AutoLoadConfig = state.AutoLoadConfig
+	local ok, encoded = pcall(function()
+		return S.HttpService:JSONEncode(index)
+	end)
+	if not ok then
+		return false
+	end
+	return pcall(function()
+		writefile(configIndexPath(), encoded)
+	end)
+end
+
+function addConfigToIndex(name)
+	local index = readConfigIndex()
+	local cleanName = cleanConfigName(name)
+	local found = false
+	for _, existing in ipairs(index.Configs) do
+		found = found or existing == cleanName
+	end
+	if not found then
+		table.insert(index.Configs, cleanName)
+		table.sort(index.Configs)
+	end
+	state.SelectedConfig = cleanName
+	state.ConfigName = cleanName
+	writeConfigIndex(index)
+end
+
+function collectConfigNames()
+	local index = readConfigIndex()
+	if #index.Configs == 0 then
+		return { state.SelectedConfig or "Default" }
+	end
+	return index.Configs
+end
+
+function encodeConfigValue(value)
+	if typeof(value) == "EnumItem" then
+		return { Type = "KeyCode", Name = value.Name }
+	end
+	return value
+end
+
+function decodeConfigValue(value)
+	if type(value) == "table" and (value.Type == "KeyCode" or value.Type == "EnumItem") and Enum.KeyCode[value.Name] then
+		return Enum.KeyCode[value.Name]
+	end
+	return value
+end
+
+function lockedConfigStateKey(key)
+	return isVoidWorld() and (
+		key == "AutoHeal"
+		or key == "HealFallback"
+		or key == "AutoHunger"
+		or key == "AutoPickup"
+		or key == "PickupEssence"
+		or key == "AutoDrop"
+		or key == "AutoHarvest"
+		or key == "AutoPlant"
+		or key == "TweenPlantBoxes"
+		or key == "TweenHarvest"
+		or key == "PlantBoxVisualizer"
+		or key == "ChestPlace"
+		or key == "WeaponAura"
+		or key == "MineAura"
+		or key == "MobAura"
+	)
+end
+
+function buildConfigData()
+	local stateData = {}
+	for key, value in pairs(state) do
+		local valueType = typeof(value)
+		if valueType == "boolean" or valueType == "number" or valueType == "string" or valueType == "EnumItem" then
+			stateData[key] = encodeConfigValue(value)
+		end
+	end
+	return {
+		Version = 1,
+		State = stateData,
+		Selections = {
+			Ore = selections.Ore,
+			Entity = selections.Entity,
+			Portal = selections.Portal,
+			Dropped = selections.Dropped,
+			Food = selections.Food,
+			AutoDrop = selections.AutoDrop,
+		},
+		DropOrder = autoHeal.DropOrder,
+	}
+end
+
+function applyConfigData(data)
+	if type(data) ~= "table" then
+		return false
+	end
+	if type(data.State) == "table" then
+		for key, value in pairs(data.State) do
+			if state[key] ~= nil and key ~= "SelectedConfig" and key ~= "ConfigName" and not lockedConfigStateKey(key) then
+				state[key] = decodeConfigValue(value)
+			end
+		end
+	end
+	if type(data.Selections) == "table" then
+		for bucketName, bucketData in pairs(data.Selections) do
+			if selections[bucketName] and type(bucketData) == "table" then
+				table.clear(selections[bucketName])
+				for key, value in pairs(bucketData) do
+					selections[bucketName][key] = value == true
+				end
+			end
+		end
+	end
+	if type(data.DropOrder) == "table" then
+		table.clear(autoHeal.DropOrder)
+		for _, name in ipairs(data.DropOrder) do
+			if type(name) == "string" then
+				table.insert(autoHeal.DropOrder, name)
+			end
+		end
+	end
+	applyGuiTheme()
+	applyCharacterSettings()
+	updateWorldEsp()
+	for key in pairs(keybindButtons) do
+		updateKeybindText(key)
+	end
+	if autoPickupToggleRedraw then autoPickupToggleRedraw() end
+	if freecamToggleRedraw then freecamToggleRedraw() end
+	return true
+end
+
+function saveConfigNamed(name, overwrite)
+	if not canUseConfigFiles() then
+		notify("Config", "Executor file API not found.")
+		return false
+	end
+	name = cleanConfigName(name)
+	local path = configPath(name)
+	if not overwrite and isfile(path) then
+		notify("Config", "Config exists. Use Rewrite Config.")
+		return false
+	end
+	local ok, encoded = pcall(function()
+		return S.HttpService:JSONEncode(buildConfigData())
+	end)
+	if not ok then
+		notify("Config", "Failed to encode config.")
+		return false
+	end
+	ensureConfigFolder()
+	local wrote = pcall(function()
+		writefile(path, encoded)
+	end)
+	if wrote then
+		addConfigToIndex(name)
+		notify("Config", "Config Saved (" .. name .. ")")
+		return true
+	end
+	notify("Config", "Failed to save config.")
+	return false
+end
+
+function saveConfig()
+	return saveConfigNamed(state.ConfigName, false)
+end
+
+function rewriteConfig()
+	return saveConfigNamed(state.SelectedConfig, true)
+end
+
+function loadConfig(silent, name)
+	if not canUseConfigFiles() then
+		if not silent then notify("Config", "Executor file API not found.") end
+		return false
+	end
+	name = cleanConfigName(name or state.SelectedConfig)
+	if not isfile(configPath(name)) then
+		if not silent then notify("Config", "No saved config found.") end
+		return false
+	end
+	local ok, data = pcall(function()
+		return S.HttpService:JSONDecode(readfile(configPath(name)))
+	end)
+	if ok and applyConfigData(data) then
+		state.SelectedConfig = name
+		state.ConfigName = name
+		local index = readConfigIndex()
+		writeConfigIndex(index)
+		if not silent then notify("Config", "Config Loaded (" .. name .. ")") end
+		return true
+	end
+	if not silent then notify("Config", "Failed to load config.") end
+	return false
+end
+
+function deleteConfig()
+	if not canUseConfigFiles() then
+		notify("Config", "Executor file API not found.")
+		return
+	end
+	local name = cleanConfigName(state.SelectedConfig)
+	local path = configPath(name)
+	if isfile(path) then
+		if typeof(delfile) ~= "function" then
+			notify("Config", "Delete file API not found.")
+			return
+		end
+		pcall(delfile, path)
+	end
+	local index = readConfigIndex()
+	for i = #index.Configs, 1, -1 do
+		if index.Configs[i] == name then
+			table.remove(index.Configs, i)
+		end
+	end
+	state.SelectedConfig = index.Configs[1] or "Default"
+	state.ConfigName = state.SelectedConfig
+	writeConfigIndex(index)
+	notify("Config", "Config Deleted (" .. name .. ")")
+end
+
+function autoLoadSavedConfig()
+	if not canUseConfigFiles() then
+		return
+	end
+	local index = readConfigIndex()
+	state.AutoLoadConfig = index.AutoLoadConfig == true
+	state.SelectedConfig = cleanConfigName(index.SelectedConfig or state.SelectedConfig)
+	state.ConfigName = state.SelectedConfig
+	if state.AutoLoadConfig and isfile(configPath(state.SelectedConfig)) then
+		loadConfig(true, state.SelectedConfig)
+		task.defer(function()
+			notify("Config", "Auto Loaded (" .. state.SelectedConfig .. ")")
+		end)
+	end
+end
+
+autoLoadSavedConfig()
+
 --// UI content
 local sections = {}
 sections.Movement = section(playerPage, "Movement")
@@ -6075,6 +6410,43 @@ createToggle(sections.Settings, "God/Tree Counter", function() return state.GodT
 	end
 end)
 createThemePicker(sections.Settings)
+
+sections.Config = section(settingsPage, "Config")
+createTextInput(sections.Config, "Config Name", function() return state.ConfigName end, function(value)
+	state.ConfigName = cleanConfigName(value)
+end)
+configDropdownRedraw = createChoiceDropdown(sections.Config, "Selected Config", collectConfigNames, function()
+	return state.SelectedConfig
+end, function(value)
+	state.SelectedConfig = cleanConfigName(value)
+	state.ConfigName = state.SelectedConfig
+	writeConfigIndex(readConfigIndex())
+end)
+createToggle(sections.Config, "Auto Load Config", function() return state.AutoLoadConfig end, function(v)
+	state.AutoLoadConfig = v
+	writeConfigIndex(readConfigIndex())
+	notify("Config", v and "Auto Load Config On" or "Auto Load Config Off")
+end)
+createActionButton(sections.Config, "Load Config", function()
+	loadConfig(false)
+end)
+createActionButton(sections.Config, "Save Config", function()
+	if saveConfig() and configDropdownRedraw then
+		configDropdownRedraw()
+	end
+end)
+createActionButton(sections.Config, "Rewrite Config", function()
+	if rewriteConfig() and configDropdownRedraw then
+		configDropdownRedraw()
+	end
+end)
+createActionButton(sections.Config, "Delete Config", function()
+	deleteConfig()
+	if configDropdownRedraw then
+		configDropdownRedraw()
+	end
+end)
+
 createChoiceDropdown(sections.Settings, "Dance Emote", {
 	"Irish Jig",
 	"Pushing",
