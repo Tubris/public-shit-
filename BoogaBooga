@@ -46,6 +46,7 @@ function isLockedLabel(label)
 		or label == "Heal Fallback"
 		or label == "Auto Hunger"
 		or label == "Auto Pickup"
+		or label == "Auto Pickup Chests"
 		or label == "Pickup Essence"
 		or label == "Auto Drop"
 		or label == "Auto Harvest"
@@ -126,6 +127,7 @@ local state = {
 	AutoHunger = true,
 	AutoHungerLevel = 80,
 	AutoPickup = false,
+	AutoPickupChests = true,
 	PickupEssence = true,
 	ItemOrbit = false,
 	ItemOrbitSpeed = 2,
@@ -190,6 +192,7 @@ if isVoidWorld() then
 	state.HealFallback = false
 	state.AutoHunger = false
 	state.AutoPickup = false
+	state.AutoPickupChests = false
 	state.PickupEssence = false
 	state.AutoDrop = false
 	state.ChestPlace = false
@@ -474,6 +477,7 @@ toggleDescriptions = {
 	["Auto Hunger"] = "Eats selected foods when hunger is under the slider.",
 	["Auto Drop"] = "Drops selected inventory items at the selected delay.",
 	["Auto Pickup"] = "Picks up nearby selected items and chest contents.",
+	["Auto Pickup Chests"] = "Picks up selected items from nearby chest contents.",
 	["Pickup Essence"] = "Only picks up nearby Essence when Auto Pickup is off.",
 	["Item Orbit"] = "Pulls nearby items into an orbit around you.",
 	["Auto Harvest"] = "Harvests selected bushes near you.",
@@ -2498,7 +2502,7 @@ function pickupClosestItem(essenceOnly)
 			tryPickupItem(item, essenceOnly, root)
 		end
 	end
-	if not essenceOnly then
+	if not essenceOnly and state.AutoPickupChests then
 		local deployables = workspace:FindFirstChild("Deployables")
 		if deployables then
 			for _, chest in ipairs(deployables:GetChildren()) do
@@ -6191,6 +6195,7 @@ function lockedConfigStateKey(key)
 		or key == "HealFallback"
 		or key == "AutoHunger"
 		or key == "AutoPickup"
+		or key == "AutoPickupChests"
 		or key == "PickupEssence"
 		or key == "AutoDrop"
 		or key == "AutoHarvest"
@@ -6486,6 +6491,9 @@ sections.AutoPickup = section(autoPage, "Pickup")
 autoPickupToggleRedraw = createToggle(sections.AutoPickup, "Auto Pickup", function() return state.AutoPickup end, function(v)
 	state.AutoPickup = v
 	notify("Auto Pickup", v and "On" or "Off")
+end)
+createToggle(sections.AutoPickup, "Auto Pickup Chests", function() return state.AutoPickupChests end, function(v)
+	state.AutoPickupChests = v
 end)
 createToggle(sections.AutoPickup, "Pickup Essence", function() return state.PickupEssence end, function(v)
 	state.PickupEssence = v
