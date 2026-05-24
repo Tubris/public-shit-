@@ -3200,13 +3200,49 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		end)
 	end
 
-	local function refreshOptions()
+	local refreshOptions
+	local function addSelectAllOption()
+		if label ~= "Drop Items" or created["Select All"] then
+			return
+		end
+		created["Select All"] = true
+		local row = make("TextButton", {
+			Name = "Select All",
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundColor3 = themeColor(0.78, 0.7),
+			BorderSizePixel = 0,
+			AutoButtonColor = false,
+			Font = Enum.Font.GothamBold,
+			Text = "Select All",
+			TextColor3 = Color3.fromRGB(255, 250, 255),
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 82,
+			LayoutOrder = -10,
+		}, options)
+		corner(row, 6)
+		make("UIPadding", {
+			PaddingLeft = UDim.new(0, 8),
+			PaddingRight = UDim.new(0, 8),
+		}, row)
+		connect(row.MouseButton1Click, function()
+			table.clear(autoHeal.DropOrder)
+			for _, itemName in ipairs(getNames()) do
+				selections[itemName] = true
+				table.insert(autoHeal.DropOrder, itemName)
+			end
+			refreshOptions()
+		end)
+	end
+
+	function refreshOptions()
 		for _, child in ipairs(options:GetChildren()) do
 			if child:IsA("TextButton") then
 				child:Destroy()
 			end
 		end
 		created = {}
+		addSelectAllOption()
 		for _, name in ipairs(getNames()) do
 			addOption(name)
 		end
