@@ -94,6 +94,7 @@ local state = {
 	ChestPlace = false,
 	AutoHarvest = false,
 	AutoPlant = false,
+	PlantBoxVisualizer = false,
 	AutoPlantItem = "Bloodfruit",
 	TweenPlantBoxes = false,
 	TweenHarvest = false,
@@ -366,6 +367,7 @@ local autoHeal = {
 	GodCounters = {},
 	ChestPreview = nil,
 	ChestLastPlace = 0,
+	PlantBoxPreview = {},
 	PlantBoxRunning = false,
 	HealthBarValue = nil,
 	HealthBarMax = nil,
@@ -729,7 +731,9 @@ end
 function showCustomNotification(titleText, bodyText, duration)
 	local body = bodyText or ""
 	local textLength = #tostring(titleText or "") + #tostring(body)
-	local toastHeight = math.clamp(58 + math.max(0, textLength - 45) * 0.75, 58, 112)
+	local lineCount = select(2, tostring(body):gsub("\n", "")) + 1
+	local wrapRows = math.ceil(math.max(#tostring(body), 1) / 42)
+	local toastHeight = math.clamp(46 + math.max(lineCount, wrapRows) * 15, 58, 118)
 	local toast = make("Frame", {
 		Name = "ChubbisonNotification",
 		AnchorPoint = Vector2.new(0, 1),
@@ -2464,7 +2468,7 @@ function startFarmTweenLoop()
 	end
 	autoHeal.FarmTweenLoop = true
 	task.spawn(function()
-		while state.TweenPlantBoxes or state.TweenHarvest do
+		while screenGui.Parent and (state.TweenPlantBoxes or state.TweenHarvest) do
 			local _, hum, root = getCharacterParts()
 			if hum and hum.Health > 0 and root then
 				if state.TweenPlantBoxes then
@@ -2488,6 +2492,19 @@ function startFarmTweenLoop()
 		end
 		autoHeal.FarmTweenLoop = false
 	end)
+end
+
+function stopFarmTweening()
+	state.TweenPlantBoxes = false
+	state.TweenHarvest = false
+	autoHeal.FarmTweenLoop = false
+	autoHeal.FarmTweenGoal = nil
+	if autoHeal.FarmTween then
+		pcall(function()
+			autoHeal.FarmTween:Cancel()
+		end)
+		autoHeal.FarmTween = nil
+	end
 end
 
 function updateAutoFarm(dt)
@@ -2572,9 +2589,51 @@ function sendPlantBoxPlacement(cf)
 	return ok
 end
 
+function clearPlantBoxVisualizer()
+	for _, part in ipairs(autoHeal.PlantBoxPreview) do
+		if part and part.Parent then
+			part:Destroy()
+		end
+	end
+	table.clear(autoHeal.PlantBoxPreview)
+end
+
+function showPlantBoxVisualizer(gridSize)
+	clearPlantBoxVisualizer()
+	if not state.PlantBoxVisualizer then
+		return
+	end
+	local _, hum, root = getCharacterParts()
+	if not hum or hum.Health <= 0 or not root then
+		return
+	end
+	local startPos = root.Position - Vector3.new(0, 3, 0)
+	local spacing = 6.04
+	for x = 0, gridSize - 1 do
+		for z = 0, gridSize - 1 do
+			local box = Instance.new("Part")
+			box.Name = "ChubbisonPlantBoxPreview"
+			box.Size = Vector3.new(5.6, 0.45, 5.6)
+			box.CFrame = CFrame.new(startPos + Vector3.new(x * spacing, 0, z * spacing))
+			box.Anchored = true
+			box.CanCollide = false
+			box.CastShadow = false
+			box.Material = Enum.Material.Neon
+			box.Color = themeColor(0.8, 1)
+			box.Transparency = 0.72
+			box.Parent = workspace
+			table.insert(autoHeal.PlantBoxPreview, box)
+		end
+	end
+end
+
 function placePlantBoxGrid(gridSize)
 	if autoHeal.PlantBoxRunning then
 		notify("AutoPlaceBox", "Already placing boxes.")
+		return
+	end
+	showPlantBoxVisualizer(gridSize)
+	if state.PlantBoxVisualizer then
 		return
 	end
 	local totalBoxes = gridSize * gridSize
@@ -2619,6 +2678,13 @@ function placePlantBoxGrid(gridSize)
 				end
 				if not screenGui.Parent then
 					autoHeal.PlantBoxRunning = false
+					return
+				end
+				local liveLeaves = inventoryQuantity("Leaves")
+				local liveWood = inventoryQuantity("Wood")
+				if liveLeaves < 2 or liveWood < 2 then
+					autoHeal.PlantBoxRunning = false
+					notify("AutoPlaceBox", string.format("Stopped. Ran out of resources. Leaves: %d Wood: %d. Placed %d boxes.", liveLeaves, liveWood, placed))
 					return
 				end
 				sendPlantBoxPlacement(CFrame.new(startPos + Vector3.new(x * spacing, 0, z * spacing)))
@@ -5066,18 +5132,6 @@ end)
 createToggle(sections.AutoPickup, "Pickup Essence", function() return state.PickupEssence end, function(v)
 	state.PickupEssence = v
 end)
-createToggle(sections.AutoPickup, "Item Orbit", function() return state.ItemOrbit end, function(v)
-	state.ItemOrbit = v
-	autoHeal.OrbitLastTime = 0
-	if v then
-		notify("Item Orbit", "DONT MOVE WHILE ACTIVE YOU WILL LOSE EVERYTHING!!!🚨🚨🚨")
-	else
-		cleanupItemOrbit()
-	end
-end)
-createSlider(sections.AutoPickup, "Orbit Speed", 1, 10, function() return state.ItemOrbitSpeed end, function(v)
-	state.ItemOrbitSpeed = v
-end)
 
 sections.AutoFarm = section(autoPage, "Farming")
 createToggle(sections.AutoFarm, "Auto Harvest", function() return state.AutoHarvest end, function(v)
@@ -5111,16 +5165,24 @@ end)
 createSlider(sections.AutoFarm, "Tween Check Distance", 50, 1000, function() return state.TweenCheckDistance end, function(v)
 	state.TweenCheckDistance = v
 end)
-createActionButton(sections.AutoFarm, "AutoPlaceBox 5x5 - 25 Total (50W/50L)", function()
+createToggle(sections.AutoFarm, "Plant Box Visualizer", function() return state.PlantBoxVisualizer end, function(v)
+	state.PlantBoxVisualizer = v
+	if v then
+		notify("Plant Box Visualizer", "Turn off to place boxes")
+	else
+		clearPlantBoxVisualizer()
+	end
+end)
+createActionButton(sections.AutoFarm, "AutoPlaceBox 5x5 - 25 Total", function()
 	placePlantBoxGrid(5)
 end)
-createActionButton(sections.AutoFarm, "AutoPlaceBox 10x10 - 100 Total (200W/200L)", function()
+createActionButton(sections.AutoFarm, "AutoPlaceBox 10x10 - 100 Total", function()
 	placePlantBoxGrid(10)
 end)
-createActionButton(sections.AutoFarm, "AutoPlaceBox 15x15 - 225 Total (450W/450L)", function()
+createActionButton(sections.AutoFarm, "AutoPlaceBox 15x15 - 225 Total", function()
 	placePlantBoxGrid(15)
 end)
-createActionButton(sections.AutoFarm, "AutoPlaceBox 16x16 - 256 Total (512W/512L)", function()
+createActionButton(sections.AutoFarm, "AutoPlaceBox 16x16 - 256 Total", function()
 	placePlantBoxGrid(16)
 end)
 
@@ -5185,12 +5247,24 @@ createToggle(sections.Settings, "Uncap FPS", function() return state.UncapFps en
 end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
+createToggle(sections.Settings, "Item Orbit", function() return state.ItemOrbit end, function(v)
+	state.ItemOrbit = v
+	autoHeal.OrbitLastTime = 0
+	if v then
+		notify("Item Orbit", "DONT MOVE WHILE ACTIVE YOU WILL LOSE EVERYTHING!!!")
+	else
+		cleanupItemOrbit()
+	end
+end)
+createSlider(sections.Settings, "Orbit Speed", 1, 10, function() return state.ItemOrbitSpeed end, function(v)
+	state.ItemOrbitSpeed = v
+end)
 createToggle(sections.Settings, "Auto Disconnect", function() return state.AutoDisconnect end, function(v)
 	state.AutoDisconnect = v
 	autoHeal.AutoDisconnectLastHealth = getLocalWorkspaceHealth()
 	autoHeal.AutoDisconnectLastDamage = os.clock()
 	if v then
-		notify("Auto Disconnect", "Leaves if HP is 100, no damage for 15s, and a player is inside the set range.")
+		notify("Auto Disconnect", "Disconnects if Player within " .. state.AutoDisconnectRange .. " studs.")
 	end
 end)
 createSlider(sections.Settings, "Disconnect Range", 50, 1000, function() return state.AutoDisconnectRange end, function(v)
@@ -5331,8 +5405,10 @@ connect(minimize.MouseButton1Click, function()
 end)
 
 connect(close.MouseButton1Click, function()
+	stopFarmTweening()
 	destroyChestPreview()
 	cleanupItemOrbit()
+	clearPlantBoxVisualizer()
 	screenGui:Destroy()
 end)
 
@@ -5674,6 +5750,7 @@ connect(S.RunService.RenderStepped, function(dt)
 end)
 
 screenGui.Destroying:Connect(function()
+	stopFarmTweening()
 	if state.Freecam then
 		setFreecam(false)
 	end
@@ -5688,6 +5765,7 @@ screenGui.Destroying:Connect(function()
 	end
 	stopDance()
 	stopFly()
+	clearPlantBoxVisualizer()
 	setCoreChatVisible(defaults.ChatEnabled)
 	workspace.Gravity = defaults.Gravity
 	player.CameraMaxZoomDistance = defaults.CameraMaxZoom
