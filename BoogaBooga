@@ -357,6 +357,7 @@ local autoHeal = {
 	AuraScanTimer = 0,
 	AuraCandidates = {},
 	AuraRedraws = {},
+	PlayerHitboxes = {},
 	WorldRainbowTimer = 0,
 	NoclipTimer = 0,
 	RopeTimer = 0,
@@ -2925,10 +2926,60 @@ function considerAuraTarget(best, candidate, rootPosition, auraType)
 	local position = adornee.Position
 	local offset = rootPosition - position
 	local distanceSq = offset:Dot(offset)
-	if distanceSq <= 3600 and (not best or distanceSq < best.DistanceSq) then
+	local maxDistanceSq = auraType == "Weapon" and 10000 or 3600
+	if distanceSq <= maxDistanceSq and (not best or distanceSq < best.DistanceSq) then
 		return { EntityID = entityID, Position = position, DistanceSq = distanceSq }
 	end
 	return best
+end
+
+function restorePlayerAuraHitboxes()
+	for part, original in pairs(autoHeal.PlayerHitboxes) do
+		if part and part.Parent then
+			pcall(function()
+				part.Size = original.Size
+				part.Transparency = original.Transparency
+				part.CanCollide = original.CanCollide
+				part.Massless = original.Massless
+			end)
+		end
+		autoHeal.PlayerHitboxes[part] = nil
+	end
+end
+
+function updatePlayerAuraHitboxes()
+	if not state.WeaponAura then
+		restorePlayerAuraHitboxes()
+		return
+	end
+	local playersFolder = workspace:FindFirstChild("Players")
+	if not playersFolder then
+		return
+	end
+	for _, model in ipairs(playersFolder:GetChildren()) do
+		if model:IsA("Model") and model.Name ~= player.Name then
+			local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+			if part and part:IsA("BasePart") then
+				if not autoHeal.PlayerHitboxes[part] then
+					autoHeal.PlayerHitboxes[part] = {
+						Size = part.Size,
+						Transparency = part.Transparency,
+						CanCollide = part.CanCollide,
+						Massless = part.Massless,
+					}
+				end
+				part.Size = Vector3.new(14, 14, 14)
+				part.Transparency = math.max(part.Transparency, 0.75)
+				part.CanCollide = false
+				part.Massless = true
+			end
+		end
+	end
+	for part in pairs(autoHeal.PlayerHitboxes) do
+		if not part or not part.Parent then
+			autoHeal.PlayerHitboxes[part] = nil
+		end
+	end
 end
 
 function closestAuraTarget(rootPosition, auraType)
@@ -2985,8 +3036,10 @@ function updateAuras(dt)
 		if #autoHeal.AuraCandidates > 0 then
 			table.clear(autoHeal.AuraCandidates)
 		end
+		restorePlayerAuraHitboxes()
 		return
 	end
+	updatePlayerAuraHitboxes()
 	autoHeal.AuraScanTimer += dt
 	if autoHeal.AuraScanTimer >= 1 or #autoHeal.AuraCandidates == 0 then
 		autoHeal.AuraScanTimer = 0
@@ -3030,6 +3083,9 @@ function setAura(stateKey, value, label)
 	state[stateKey] = value
 	autoHeal.AuraScanTimer = 1
 	table.clear(autoHeal.AuraCandidates)
+	if stateKey == "WeaponAura" and not value then
+		restorePlayerAuraHitboxes()
+	end
 	notify(label, (value and "On - " or "Off - ") .. auraMessage(label))
 end
 
@@ -5974,6 +6030,7 @@ screenGui.Destroying:Connect(function()
 	end
 	stopDance()
 	stopFly()
+	restorePlayerAuraHitboxes()
 	clearPlantBoxVisualizer()
 	setCoreChatVisible(defaults.ChatEnabled)
 	workspace.Gravity = defaults.Gravity
