@@ -87,6 +87,8 @@ local state = {
 	AutoHungerLevel = 80,
 	AutoPickup = false,
 	PickupEssence = true,
+	ItemOrbit = false,
+	ItemOrbitSpeed = 2,
 	ChestPlace = false,
 	AutoHarvest = false,
 	AutoPlant = false,
@@ -329,6 +331,9 @@ local autoHeal = {
 	PickupRemote = nil,
 	PickupSound = nil,
 	PickupTimer = 0,
+	OrbitTimer = 0,
+	OrbitLastTime = 0,
+	OrbitItems = {},
 	FarmTimer = 0,
 	AuraTimer = 0,
 	AuraScanTimer = 0,
@@ -2138,6 +2143,102 @@ function updateAutoPickup(dt)
 	end
 	autoHeal.PickupTimer = 0
 	pickupClosestItem(state.PickupEssence and not state.AutoPickup)
+end
+
+function cleanupItemOrbit()
+	for item, data in pairs(autoHeal.OrbitItems) do
+		if data.Body then
+			pcall(function()
+				data.Body:Destroy()
+			end)
+		end
+		autoHeal.OrbitItems[item] = nil
+	end
+end
+
+function getOrbitPart(item)
+	if item:IsA("BasePart") then
+		return item
+	end
+	if item:IsA("Model") then
+		return item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+	end
+	return nil
+end
+
+function attachOrbitItem(part, index)
+	local body = Instance.new("BodyVelocity")
+	body.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	body.Velocity = Vector3.new(0, 0, 0)
+	body.P = 5000
+	body.Parent = part
+	autoHeal.OrbitItems[part] = {
+		Body = body,
+		BaseRadius = 4 + (math.sin(index * 73) * 0.5 + 0.5) * 14,
+		BaseHeight = 2,
+		Speed = state.ItemOrbitSpeed + math.sin(index * 73) * 0.6,
+		WaveFrequency = 1.5 + math.sin(index * 47) * 0.8,
+		WaveAmplitude = 2.5 + math.sin(index * 83) * 1.2,
+		WobbleSpeed = 0.3 + math.sin(index * 97) * 0.2,
+		Angle = (index * 47) % (math.pi * 2),
+	}
+end
+
+function scanOrbitItems(root)
+	local itemsFolder = workspace:FindFirstChild("Items")
+	if not itemsFolder then
+		return
+	end
+	local index = 0
+	for _, item in ipairs(itemsFolder:GetChildren()) do
+		local part = getOrbitPart(item)
+		if part and part.Parent and not autoHeal.OrbitItems[part] then
+			local offset = part.Position - root.Position
+			if offset:Dot(offset) <= 1600 then
+				attachOrbitItem(part, index)
+				index += 1
+			end
+		end
+	end
+end
+
+function updateItemOrbit(dt)
+	if not state.ItemOrbit then
+		if next(autoHeal.OrbitItems) then
+			cleanupItemOrbit()
+		end
+		return
+	end
+	local _, hum, root = getCharacterParts()
+	if not hum or hum.Health <= 0 or not root then
+		return
+	end
+	autoHeal.OrbitTimer += dt
+	if autoHeal.OrbitTimer >= 0.1 then
+		autoHeal.OrbitTimer = 0
+		scanOrbitItems(root)
+	end
+	local now = os.clock()
+	local deltaTime = math.min(now - (autoHeal.OrbitLastTime > 0 and autoHeal.OrbitLastTime or now), 0.1)
+	autoHeal.OrbitLastTime = now
+	for item, data in pairs(autoHeal.OrbitItems) do
+		if not item or not item.Parent then
+			if data.Body then
+				pcall(function() data.Body:Destroy() end)
+			end
+			autoHeal.OrbitItems[item] = nil
+		else
+			data.Speed = state.ItemOrbitSpeed + math.sin(data.Angle * 0.7) * 0.6
+			data.Angle = (data.Angle + data.Speed * deltaTime) % (math.pi * 2)
+			local height = data.BaseHeight + math.sin(data.Angle * data.WaveFrequency) * data.WaveAmplitude
+			local radius = math.clamp(data.BaseRadius + math.sin(now * data.WobbleSpeed) * 1.2, 4, 18)
+			local targetPos = root.Position + Vector3.new(math.cos(data.Angle) * radius, height, math.sin(data.Angle) * radius)
+			item.CFrame = CFrame.new(item.Position:Lerp(targetPos, 0.35))
+			if data.Body then
+				data.Body.Velocity = Vector3.new(0, 0, 0)
+			end
+		end
+	end
 end
 
 function getDropPacket()
@@ -4540,7 +4641,7 @@ createToggle(sections.Movement, "Walk Speed", function() return state.WalkSpeedE
 	enforceMovementOverrides()
 	task.delay(0.1, enforceMovementOverrides)
 end)
-createSlider(sections.Movement, "Walk Speed", 0, 20, function() return state.WalkSpeed end, function(v)
+createSlider(sections.Movement, "Walk Speed", 0, 23, function() return state.WalkSpeed end, function(v)
 	state.WalkSpeed = v
 	applyCharacterSettings()
 	enforceMovementOverrides()
@@ -4644,6 +4745,18 @@ autoPickupToggleRedraw = createToggle(sections.AutoPickup, "Auto Pickup", functi
 end)
 createToggle(sections.AutoPickup, "Pickup Essence", function() return state.PickupEssence end, function(v)
 	state.PickupEssence = v
+end)
+createToggle(sections.AutoPickup, "Item Orbit", function() return state.ItemOrbit end, function(v)
+	state.ItemOrbit = v
+	autoHeal.OrbitLastTime = 0
+	if v then
+		notify("Item Orbit", "DONT MOVE WHILE ACTIVE YOU WILL LOSE EVERYTHING!!!🚨🚨🚨")
+	else
+		cleanupItemOrbit()
+	end
+end)
+createSlider(sections.AutoPickup, "Orbit Speed", 1, 10, function() return state.ItemOrbitSpeed end, function(v)
+	state.ItemOrbitSpeed = v
 end)
 
 sections.AutoFarm = section(autoPage, "Farming")
@@ -4859,6 +4972,7 @@ end)
 
 connect(close.MouseButton1Click, function()
 	destroyChestPreview()
+	cleanupItemOrbit()
 	screenGui:Destroy()
 end)
 
@@ -5046,6 +5160,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	updateAutoHeal(dt)
 	updateAutoHunger(dt)
 	updateAutoPickup(dt)
+	updateItemOrbit(dt)
 	updateAutoDrop(dt)
 	updateAutoFarm(dt)
 	updateAuras(dt)
