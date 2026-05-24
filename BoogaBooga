@@ -27,6 +27,44 @@ local PLACE = {
 	ServerList = 11729688377,
 }
 
+function isVoidWorld()
+	if game.PlaceId == PLACE.Overworld then
+		return false
+	end
+	return game.PlaceId == PLACE.VoidWorld or game.GameId == PLACE.VoidWorld
+end
+
+function lockedFeatureMessage()
+	notify("Feature Locked", "Locked in Void to prevent kick.")
+end
+
+function isLockedLabel(label)
+	if not isVoidWorld() then
+		return false
+	end
+	return label == "Auto Heal"
+		or label == "Heal Fallback"
+		or label == "Auto Hunger"
+		or label == "Auto Pickup"
+		or label == "Pickup Essence"
+		or label == "Auto Drop"
+		or label == "Auto Harvest"
+		or label == "Auto Plant"
+		or label == "Tween Plant Boxes"
+		or label == "Tween Harvest"
+		or label == "Plant Box Visualizer"
+		or string.find(label, "AutoPlaceBox", 1, true) ~= nil
+		or label == "Abort AutoPlaceBox"
+		or label == "Chest Place"
+		or label == "Weapon Aura"
+		or label == "Mine Aura"
+		or label == "Mob Aura"
+end
+
+function isLockedKeybind(stateKey)
+	return isVoidWorld() and stateKey == "AutoPickupKey"
+end
+
 local UI = {
 	NormalPanelPosition = UDim2.new(0, 18, 0.830000011, -380),
 	NormalPanelSize = UDim2.new(0, 496, 0, 380),
@@ -144,6 +182,24 @@ local state = {
 	PerformanceGuard = true,
 }
 
+if isVoidWorld() then
+	state.AutoHeal = false
+	state.HealFallback = false
+	state.AutoHunger = false
+	state.AutoPickup = false
+	state.PickupEssence = false
+	state.AutoDrop = false
+	state.ChestPlace = false
+	state.AutoHarvest = false
+	state.AutoPlant = false
+	state.TweenPlantBoxes = false
+	state.TweenHarvest = false
+	state.PlantBoxVisualizer = false
+	state.WeaponAura = false
+	state.MineAura = false
+	state.MobAura = false
+end
+
 local selections = {
 	Ore = {
 		Iron = true,
@@ -171,12 +227,13 @@ local selections = {
 		Banana = true,
 		Bluefruit = true,
 		Coconut = true,
+		Oddberry = true,
 		Jelly = false,
 		["Blood Fruit"] = false,
 	},
 }
 
-local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Jelly", "Blood Fruit" }
+local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Jelly", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
 local oreFallbackColors = {
@@ -818,7 +875,7 @@ function showCustomNotification(titleText, bodyText, duration)
 end
 
 function showLoadNotification()
-	showCustomNotification("Chubbison Me Loaded", "Gui Toggle: Return", 4)
+	showCustomNotification("Chubbison Me Loaded", isVoidWorld() and "Gui Toggle: Return\nSome Features are Locked to Prevent Kick" or "Gui Toggle: Return", 4)
 end
 task.delay(0.8, showLoadNotification)
 task.defer(function()
@@ -1139,7 +1196,39 @@ function createToggle(parent, label, getValue, setValue)
 		BorderSizePixel = 0,
 	}, button)
 	corner(knob, 9)
-
+	local locked = isLockedLabel(label)
+	if locked then
+		local lockIcon = make("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			Size = UDim2.new(0, 24, 0, 22),
+			BackgroundTransparency = 1,
+			ZIndex = 3,
+		}, button)
+		local shackle = make("Frame", {
+			Position = UDim2.new(0.5, -7, 0, 1),
+			Size = UDim2.new(0, 14, 0, 12),
+			BackgroundTransparency = 1,
+			ZIndex = 4,
+		}, lockIcon)
+		corner(shackle, 7)
+		stroke(shackle, Color3.fromRGB(155, 155, 165), 0.08, 2)
+		local body = make("Frame", {
+			Position = UDim2.new(0.5, -9, 0, 9),
+			Size = UDim2.new(0, 18, 0, 12),
+			BackgroundColor3 = Color3.fromRGB(150, 150, 160),
+			BorderSizePixel = 0,
+			ZIndex = 5,
+		}, lockIcon)
+		corner(body, 3)
+		make("Frame", {
+			Position = UDim2.new(0.5, -2, 0, 4),
+			Size = UDim2.new(0, 4, 0, 5),
+			BackgroundColor3 = Color3.fromRGB(80, 80, 90),
+			BorderSizePixel = 0,
+			ZIndex = 6,
+		}, body)
+	end
 	local function redraw()
 		local on = getValue()
 		tween(button, nil, {
@@ -1153,6 +1242,10 @@ function createToggle(parent, label, getValue, setValue)
 	end
 
 	connect(button.MouseButton1Click, function()
+		if locked then
+			lockedFeatureMessage()
+			return
+		end
 		setValue(not getValue())
 		redraw()
 	end)
@@ -1367,28 +1460,45 @@ function createKeybind(parent, label, stateKey)
 	}, row)
 	corner(keybindButton, 7)
 	keybindButtons[stateKey] = keybindButton
+	if isLockedKeybind(stateKey) then
+		keybindButton.Text = "LOCK"
+		keybindButton.TextColor3 = Color3.fromRGB(255, 120, 145)
+	end
 
 	connect(keybindButton.MouseButton1Click, function()
+		if isLockedKeybind(stateKey) then
+			lockedFeatureMessage()
+			return
+		end
 		awaitingKeybindFor = stateKey
 		updateKeybindText(stateKey)
 	end)
 
-	updateKeybindText(stateKey)
+	if not isLockedKeybind(stateKey) then
+		updateKeybindText(stateKey)
+	end
 end
 
 function createActionButton(parent, label, callback)
+	local locked = isLockedLabel(label)
 	local button = make("TextButton", {
 		Size = UDim2.new(1, 0, 0, 32),
-		BackgroundColor3 = Color3.fromRGB(245, 245, 245),
+		BackgroundColor3 = locked and Color3.fromRGB(70, 45, 65) or Color3.fromRGB(245, 245, 245),
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
 		Font = Enum.Font.GothamBold,
-		Text = label,
-		TextColor3 = Color3.fromRGB(5, 5, 6),
+		Text = locked and ("LOCK " .. label) or label,
+		TextColor3 = locked and Color3.fromRGB(255, 170, 190) or Color3.fromRGB(5, 5, 6),
 		TextSize = 12,
 	}, parent)
 	corner(button, 7)
-	connect(button.MouseButton1Click, callback)
+	connect(button.MouseButton1Click, function()
+		if locked then
+			lockedFeatureMessage()
+			return
+		end
+		callback()
+	end)
 	return button
 end
 
@@ -1588,6 +1698,7 @@ function resetGuiLayout()
 	mainAura.Size = UI.NormalAuraSize
 	mainShadow.Position = UI.NormalShadowPosition
 	mainShadow.Size = UI.NormalShadowSize
+	syncFreecamMouse()
 	notify("Chubbison Me", "GUI reset.")
 end
 
@@ -1868,7 +1979,7 @@ function notifyBloodfruitCount()
 end
 
 function updateAutoHeal(dt)
-	if not state.AutoHeal then
+	if isVoidWorld() or not state.AutoHeal then
 		autoHeal.HealNotified = false
 		autoHeal.ExpectedHealth = nil
 		autoHeal.LastHealDrop = nil
@@ -2028,6 +2139,10 @@ function updateChestPreview()
 end
 
 function placeChest()
+	if isVoidWorld() then
+		lockedFeatureMessage()
+		return
+	end
 	if os.clock() - autoHeal.ChestLastPlace < 0.2 or not loadAutoHealModules() then
 		return
 	end
@@ -2045,7 +2160,7 @@ function placeChest()
 end
 
 function updateAutoHunger(dt)
-	if not state.AutoHunger then
+	if isVoidWorld() or not state.AutoHunger then
 		autoHeal.HungerPendingFood = nil
 		autoHeal.NoHungerAttempts = 0
 		return
@@ -2252,7 +2367,7 @@ function pickupClosestItem(essenceOnly)
 end
 
 function instantPickupChild(item)
-	if not state.AutoPickup and not state.PickupEssence then
+	if isVoidWorld() or (not state.AutoPickup and not state.PickupEssence) then
 		return
 	end
 	local _, hum, root = getCharacterParts()
@@ -2272,7 +2387,7 @@ function instantPickupChild(item)
 end
 
 function updateAutoPickup(dt)
-	if not state.AutoPickup and not state.PickupEssence then
+	if isVoidWorld() or (not state.AutoPickup and not state.PickupEssence) then
 		return
 	end
 	autoHeal.PickupTimer += dt
@@ -2556,6 +2671,10 @@ function nearestEmptyPlantBox(root, range)
 end
 
 function startFarmTweenLoop()
+	if isVoidWorld() then
+		lockedFeatureMessage()
+		return
+	end
 	if autoHeal.FarmTweenLoop then
 		return
 	end
@@ -2601,7 +2720,7 @@ function stopFarmTweening()
 end
 
 function updateAutoFarm(dt)
-	if not state.AutoHarvest and not state.AutoPlant then
+	if isVoidWorld() or (not state.AutoHarvest and not state.AutoPlant) then
 		return
 	end
 	autoHeal.FarmTimer += dt
@@ -2722,6 +2841,10 @@ function showPlantBoxVisualizer(gridSize)
 end
 
 function placePlantBoxGrid(gridSize)
+	if isVoidWorld() then
+		lockedFeatureMessage()
+		return
+	end
 	if autoHeal.PlantBoxRunning then
 		notify("AutoPlaceBox", "Already placing boxes.")
 		return
@@ -3032,6 +3155,10 @@ function sendAuraAttack(targets, root)
 end
 
 function updateAuras(dt)
+	if isVoidWorld() then
+		restorePlayerAuraHitboxes()
+		return
+	end
 	if not state.WeaponAura and not state.MineAura and not state.MobAura then
 		if #autoHeal.AuraCandidates > 0 then
 			table.clear(autoHeal.AuraCandidates)
@@ -3791,6 +3918,20 @@ function enforceMovementOverrides()
 	end
 end
 
+function syncFreecamMouse()
+	if not state.Freecam then
+		return
+	end
+
+	if state.PanelVisible then
+		S.UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		S.UserInputService.MouseIconEnabled = true
+	else
+		S.UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		S.UserInputService.MouseIconEnabled = false
+	end
+end
+
 function setFreecam(enabled)
 	state.Freecam = enabled
 	camera = workspace.CurrentCamera
@@ -3831,8 +3972,7 @@ function setFreecam(enabled)
 		freecam.Yaw = math.atan2(-look.X, -look.Z)
 		freecam.Pitch = math.asin(math.clamp(look.Y, -1, 1))
 		camera.CameraType = Enum.CameraType.Scriptable
-		S.UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		S.UserInputService.MouseIconEnabled = false
+		syncFreecamMouse()
 		if not freecamReturnTracer then
 			freecamReturnTracer = createTracer(Color3.fromRGB(255, 255, 255))
 		end
@@ -4131,11 +4271,11 @@ function createBillboard(name, color, size, hasSubText)
 	local textColor = readableEspColor(color)
 	local billboard = make("BillboardGui", {
 		Name = "ControlPanelEspBillboard",
-		Size = hasSubText and UDim2.fromOffset(190, 54) or UDim2.fromOffset(180, 42),
+		Size = hasSubText and UDim2.fromOffset(230, 58) or UDim2.fromOffset(220, 44),
 		StudsOffset = Vector3.new(0, 3, 0),
 		AlwaysOnTop = true,
 		LightInfluence = 0,
-		MaxDistance = 100000,
+		MaxDistance = math.huge,
 		Enabled = true,
 	}, nil)
 
@@ -4148,7 +4288,9 @@ function createBillboard(name, color, size, hasSubText)
 		TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
 		TextStrokeTransparency = 0.18,
 		TextSize = size,
-		TextWrapped = true,
+		TextScaled = false,
+		TextWrapped = false,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, billboard)
 
 	local subText = make("TextLabel", {
@@ -4161,7 +4303,9 @@ function createBillboard(name, color, size, hasSubText)
 		TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
 		TextStrokeTransparency = 0.18,
 		TextSize = math.max(10, size - 2),
-		TextWrapped = true,
+		TextScaled = false,
+		TextWrapped = false,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		Visible = false,
 	}, billboard)
 
@@ -4281,6 +4425,8 @@ function ensurePlayerEsp(targetPlayer)
 	end
 
 	obj.Billboard.Adornee = adornee
+	obj.Billboard.MaxDistance = math.huge
+	obj.Billboard.Size = UDim2.fromOffset(230, 58)
 	obj.Highlight.Adornee = targetCharacter
 	obj.Billboard.Enabled = state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
 	obj.Highlight.Enabled = state.PlayerEsp and state.PlayerChams
@@ -4836,9 +4982,10 @@ function ensureWorldEsp(instance, ruleName)
 
 	obj.Billboard.Adornee = adornee
 	obj.Billboard.StudsOffset = ruleName == "Dropped" and Vector3.new(0, 1.25, 0) or Vector3.new(0, 3, 0)
-	obj.Billboard.Size = ruleName == "Dropped" and UDim2.fromOffset(132, 30)
-		or ruleName == "God" and UDim2.fromOffset(190, 54)
-		or UDim2.fromOffset(180, 42)
+	obj.Billboard.MaxDistance = math.huge
+	obj.Billboard.Size = ruleName == "Dropped" and UDim2.fromOffset(170, 34)
+		or ruleName == "God" and UDim2.fromOffset(230, 58)
+		or UDim2.fromOffset(220, 44)
 	obj.Highlight.Adornee = instance:IsA("Model") and instance or adornee
 	obj.Billboard.Enabled = state.WorldNames
 	obj.Highlight.Enabled = state.WorldChams
@@ -5599,8 +5746,10 @@ end)
 connect(S.UserInputService.InputChanged, function(input)
 	if state.Freecam then
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			freecam.Yaw -= input.Delta.X * 0.0025
-			freecam.Pitch = math.clamp(freecam.Pitch - input.Delta.Y * 0.0025, math.rad(-85), math.rad(85))
+			if not state.PanelVisible then
+				freecam.Yaw -= input.Delta.X * 0.0025
+				freecam.Pitch = math.clamp(freecam.Pitch - input.Delta.Y * 0.0025, math.rad(-85), math.rad(85))
+			end
 		elseif input.UserInputType == Enum.UserInputType.MouseWheel then
 			local shiftHeld = S.UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or S.UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 			local step = shiftHeld and 60 or 20
@@ -5695,6 +5844,7 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 		setCoreChatVisible(not state.PanelVisible)
 		main.Visible = state.PanelVisible
 		syncMinimizedEffects()
+		syncFreecamMouse()
 		closeDropdowns()
 		return
 	end
@@ -5713,6 +5863,10 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if input.KeyCode == state.AutoPickupKey then
+		if isLockedKeybind("AutoPickupKey") then
+			lockedFeatureMessage()
+			return
+		end
 		state.AutoPickup = not state.AutoPickup
 		if autoPickupToggleRedraw then
 			autoPickupToggleRedraw()
@@ -5722,6 +5876,10 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if input.KeyCode == state.AuraKey then
+		if isVoidWorld() then
+			lockedFeatureMessage()
+			return
+		end
 		setAllAurasFromKey()
 		return
 	end
