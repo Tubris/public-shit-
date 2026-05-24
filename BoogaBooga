@@ -420,6 +420,8 @@ local autoHeal = {
 	AuraScanTimer = 0,
 	AuraCandidates = {},
 	AuraRedraws = {},
+	CritterPositions = {},
+	CritterPositionTimer = 0,
 	PlayerHitboxes = {},
 	WorldRainbowTimer = 0,
 	NoclipTimer = 0,
@@ -3382,22 +3384,47 @@ function sendAuraAttack(targets, root, useRootCFrame)
 	end)
 end
 
-function mobAuraTargets(rootPosition)
-	local targets = {}
+function refreshCritterPositions(rootPosition)
+	table.clear(autoHeal.CritterPositions)
 	local crittersFolder = workspace:FindFirstChild("Critters")
 	if not crittersFolder then
-		return targets
+		return
 	end
 	for _, critter in ipairs(crittersFolder:GetChildren()) do
-		local entityID = auraEntityID(critter)
+		local entityID = critter:GetAttribute("EntityID")
 		if entityID then
-			local position = critter:IsA("Model") and critter:GetPivot().Position
-				or critter:IsA("BasePart") and critter.Position
-				or (getAdornee(critter) and getAdornee(critter).Position)
-			local offset = position and rootPosition - position
-			local distanceSq = offset and offset:Dot(offset)
-			if distanceSq and distanceSq <= 1600 then
-				table.insert(targets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
+			local bestPosition
+			local bestDistanceSq
+			if critter:IsA("BasePart") then
+				bestPosition = critter.Position
+				bestDistanceSq = (rootPosition - bestPosition):Dot(rootPosition - bestPosition)
+			elseif critter:IsA("Model") then
+				for _, part in ipairs(critter:GetDescendants()) do
+					if part:IsA("BasePart") then
+						local offset = rootPosition - part.Position
+						local distanceSq = offset:Dot(offset)
+						if not bestDistanceSq or distanceSq < bestDistanceSq then
+							bestDistanceSq = distanceSq
+							bestPosition = part.Position
+						end
+					end
+				end
+			end
+			if bestPosition then
+				autoHeal.CritterPositions[critter] = { EntityID = entityID, Position = bestPosition, DistanceSq = bestDistanceSq or 0 }
+			end
+		end
+	end
+end
+
+function mobAuraTargets(rootPosition)
+	local targets = {}
+	for critter, data in pairs(autoHeal.CritterPositions) do
+		if critter and critter.Parent and data.Position then
+			local offset = rootPosition - data.Position
+			local distanceSq = offset:Dot(offset)
+			if distanceSq <= 1600 then
+				table.insert(targets, { EntityID = data.EntityID, Position = data.Position, DistanceSq = distanceSq })
 			end
 		end
 	end
@@ -3432,6 +3459,15 @@ function updateAuras(dt)
 	local currentCharacter, hum, root = getCharacterParts()
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
+	end
+	if state.MobAura then
+		autoHeal.CritterPositionTimer += dt
+		if autoHeal.CritterPositionTimer >= 1 or not next(autoHeal.CritterPositions) then
+			autoHeal.CritterPositionTimer = 0
+			refreshCritterPositions(root.Position)
+		end
+	else
+		table.clear(autoHeal.CritterPositions)
 	end
 	if state.WeaponAura then
 		autoHeal.WeaponAuraTimer += dt
