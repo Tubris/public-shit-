@@ -3507,6 +3507,36 @@ function sendAuraAttack(targets, root, useRootCFrame)
 	end)
 end
 
+function critterAuraEntityID(critter)
+	if not critter then
+		return nil
+	end
+	local function readID(obj)
+		if not obj then
+			return nil
+		end
+		local id = obj:GetAttribute("EntityID") or obj:GetAttribute("EntityId") or obj:GetAttribute("entityID") or obj:GetAttribute("entityId")
+		if id then
+			return id
+		end
+		local value = obj:FindFirstChild("EntityID") or obj:FindFirstChild("EntityId") or obj:FindFirstChild("entityID") or obj:FindFirstChild("entityId")
+		if value and value:IsA("ValueBase") then
+			return value.Value
+		end
+		return nil
+	end
+	local id = readID(critter)
+	if id then
+		return id
+	end
+	if critter:IsA("Model") then
+		return readID(critter:FindFirstChild("HumanoidRootPart"))
+			or readID(critter.PrimaryPart)
+			or readID(critter:FindFirstChild("Part"))
+	end
+	return nil
+end
+
 function mobAuraTargets(rootPosition)
 	local targets = {}
 	local crittersFolder = workspace:FindFirstChild("Critters")
@@ -3515,9 +3545,9 @@ function mobAuraTargets(rootPosition)
 	end
 	for _, critter in ipairs(crittersFolder:GetChildren()) do
 		if critter:IsA("Model") or critter:IsA("BasePart") then
-			local entityID = auraEntityID(critter)
+			local entityID = critterAuraEntityID(critter)
 			local position, distanceSq = closestPartPosition(critter, rootPosition)
-			if entityID and position and distanceSq <= 1600 then
+			if entityID and position and distanceSq <= 3600 then
 				table.insert(targets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
 			end
 		end
@@ -3569,7 +3599,7 @@ function updateAuras(dt)
 				sendAuraAttack(auraTargets(root.Position, "Mine", 3), root)
 			end
 			if state.MobAura then
-				sendAuraAttack(mobAuraTargets(root.Position), root)
+				sendAuraAttack(mobAuraTargets(root.Position), root, true)
 			end
 		end
 	end
