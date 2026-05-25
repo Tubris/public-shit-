@@ -701,6 +701,35 @@ function getAdornee(instance)
 	return instance:FindFirstChildWhichIsA("BasePart", true)
 end
 
+function closestPartPosition(instance, rootPosition)
+	if not instance or not instance.Parent then
+		return nil, math.huge
+	end
+	if instance:IsA("BasePart") then
+		local offset = rootPosition - instance.Position
+		return instance.Position, offset:Dot(offset)
+	end
+	local bestPosition
+	local bestDistanceSq = math.huge
+	if instance:IsA("Model") then
+		local pivot = instance:GetPivot().Position
+		local pivotOffset = rootPosition - pivot
+		bestPosition = pivot
+		bestDistanceSq = pivotOffset:Dot(pivotOffset)
+	end
+	for _, part in ipairs(instance:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local offset = rootPosition - part.Position
+			local distanceSq = offset:Dot(offset)
+			if distanceSq < bestDistanceSq then
+				bestDistanceSq = distanceSq
+				bestPosition = part.Position
+			end
+		end
+	end
+	return bestPosition, bestDistanceSq
+end
+
 function distanceFromLocal(part)
 	local _, _, root = getCharacterParts()
 	if not root or not part then
@@ -3462,47 +3491,18 @@ function sendAuraAttack(targets, root, useRootCFrame)
 	end)
 end
 
-function refreshCritterPositions(rootPosition)
-	table.clear(autoHeal.CritterPositions)
-	local crittersFolder = workspace:FindFirstChild("Critters")
-	if not crittersFolder then
-		return
-	end
-	for _, critter in ipairs(crittersFolder:GetChildren()) do
-		local entityID = critter:GetAttribute("EntityID")
-		if entityID then
-			local bestPosition
-			local bestDistanceSq
-			if critter:IsA("BasePart") then
-				bestPosition = critter.Position
-				bestDistanceSq = (rootPosition - bestPosition):Dot(rootPosition - bestPosition)
-			elseif critter:IsA("Model") then
-				for _, part in ipairs(critter:GetDescendants()) do
-					if part:IsA("BasePart") then
-						local offset = rootPosition - part.Position
-						local distanceSq = offset:Dot(offset)
-						if not bestDistanceSq or distanceSq < bestDistanceSq then
-							bestDistanceSq = distanceSq
-							bestPosition = part.Position
-						end
-					end
-				end
-			end
-			if bestPosition then
-				autoHeal.CritterPositions[critter] = { EntityID = entityID, Position = bestPosition, DistanceSq = bestDistanceSq or 0 }
-			end
-		end
-	end
-end
-
 function mobAuraTargets(rootPosition)
 	local targets = {}
-	for critter, data in pairs(autoHeal.CritterPositions) do
-		if critter and critter.Parent and data.Position then
-			local offset = rootPosition - data.Position
-			local distanceSq = offset:Dot(offset)
-			if distanceSq <= 1600 then
-				table.insert(targets, { EntityID = data.EntityID, Position = data.Position, DistanceSq = distanceSq })
+	local crittersFolder = workspace:FindFirstChild("Critters")
+	if not crittersFolder then
+		return targets
+	end
+	for _, critter in ipairs(crittersFolder:GetChildren()) do
+		if critter:IsA("Model") or critter:IsA("BasePart") then
+			local entityID = auraEntityID(critter)
+			local position, distanceSq = closestPartPosition(critter, rootPosition)
+			if entityID and position and distanceSq <= 1600 then
+				table.insert(targets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
 			end
 		end
 	end
@@ -3538,15 +3538,6 @@ function updateAuras(dt)
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
 	end
-	if state.MobAura then
-		autoHeal.CritterPositionTimer += dt
-		if autoHeal.CritterPositionTimer >= 1 or not next(autoHeal.CritterPositions) then
-			autoHeal.CritterPositionTimer = 0
-			refreshCritterPositions(root.Position)
-		end
-	else
-		table.clear(autoHeal.CritterPositions)
-	end
 	if state.WeaponAura then
 		autoHeal.WeaponAuraTimer += dt
 		if autoHeal.WeaponAuraTimer >= 0.12 then
@@ -3562,7 +3553,7 @@ function updateAuras(dt)
 				sendAuraAttack(auraTargets(root.Position, "Mine", 3), root)
 			end
 			if state.MobAura then
-				sendAuraAttack(mobAuraTargets(root.Position), root, true)
+				sendAuraAttack(mobAuraTargets(root.Position), root)
 			end
 		end
 	end
