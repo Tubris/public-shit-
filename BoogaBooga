@@ -143,6 +143,7 @@ local state = {
 	TweenCheckDistance = 500,
 	AutoDrop = false,
 	AutoDropDelay = 100,
+	AutoDropStopFarming = false,
 	AutoRun = false,
 	Noclip = false,
 	InfCamera = true,
@@ -481,6 +482,7 @@ toggleDescriptions = {
 	["Heal Fallback"] = "Uses any food item if no Blood Fruit is available.",
 	["Auto Hunger"] = "Eats selected foods when hunger is under the slider.",
 	["Auto Drop"] = "Drops selected inventory items at the selected delay.",
+	["Auto Drop Stop (Farming)"] = "Keeps Auto Drop running after selected items are gone.",
 	["Auto Pickup"] = "Picks up nearby selected items and chest contents.",
 	["Auto Pickup Chests"] = "Picks up selected items from nearby chest contents.",
 	["Pickup Essence"] = "Only picks up nearby Essence when Auto Pickup is off.",
@@ -2886,11 +2888,16 @@ function updateAutoDrop(dt)
 		end
 	end
 	if #names == 0 then
-		notify("Auto Drop", "Finished dropping selected items.")
-		state.AutoDrop = false
 		autoHeal.DropTimer = 0
 		autoHeal.DropIndex = 1
-		if autoDropToggleRedraw then autoDropToggleRedraw() end
+		if state.AutoDropStopFarming then
+			return
+		end
+		notify("Auto Drop", "Finished dropping selected items.")
+		state.AutoDrop = false
+		if autoDropToggleRedraw then
+			autoDropToggleRedraw()
+		end
 		return
 	end
 	if autoHeal.DropIndex > #names then
@@ -6762,6 +6769,9 @@ end)
 createToggle(sections.Settings, "Black Screen", function() return state.BlackScreen end, function(v)
 	state.BlackScreen = v
 	blackScreenFrame.Visible = v
+end)
+createToggle(sections.Settings, "Auto Drop Stop (Farming)", function() return state.AutoDropStopFarming end, function(v)
+	state.AutoDropStopFarming = v
 end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
