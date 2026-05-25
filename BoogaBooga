@@ -178,10 +178,10 @@ local state = {
 	WorldDistance = true,
 	WorldTracers = false,
 	WorldTextSize = 12,
-	WorldMaxObjects = 70,
-	DroppedMaxObjects = 30,
-	WorldRefreshTime = 4.5,
-	WorldLabelRefreshTime = 0.5,
+	WorldMaxObjects = 55,
+	DroppedMaxObjects = 18,
+	WorldRefreshTime = 7,
+	WorldLabelRefreshTime = 0.8,
 	GodTreeCounter = true,
 	PerformanceGuard = true,
 	AutoLoadConfig = false,
@@ -3598,10 +3598,17 @@ function updateAuras(dt)
 		return
 	end
 	updatePlayerAuraHitboxes()
-	autoHeal.AuraScanTimer += dt
-	if autoHeal.AuraScanTimer >= 2.5 or #autoHeal.AuraCandidates == 0 then
+	if state.WeaponAura or state.MineAura then
+		autoHeal.AuraScanTimer += dt
+		if autoHeal.AuraScanTimer >= 5 or #autoHeal.AuraCandidates == 0 then
+			autoHeal.AuraScanTimer = 0
+			refreshAuraCandidates()
+		end
+	else
 		autoHeal.AuraScanTimer = 0
-		refreshAuraCandidates()
+		if #autoHeal.AuraCandidates > 0 then
+			table.clear(autoHeal.AuraCandidates)
+		end
 	end
 	loadAutoHealModules()
 	local currentCharacter, hum, root = getCharacterParts()
@@ -4113,6 +4120,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 
 	local expanded = false
 	local rows = {}
+	local closeDropdown
 
 	local function rebuildRows()
 		for _, row in pairs(rows) do
@@ -4155,7 +4163,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		end
 	end
 
-	local function closeDropdown()
+	function closeDropdown()
 		if expanded then
 			openDropdowns = math.max(0, openDropdowns - 1)
 			dropdownBlocker.Visible = openDropdowns > 0
@@ -5602,7 +5610,7 @@ function getWorldCandidates()
 	local candidates = {}
 
 	for instance in pairs(esp.Candidates) do
-		if instance.Parent and canBeWorldCandidate(instance) then
+		if instance.Parent then
 			table.insert(candidates, instance)
 		else
 			esp.Candidates[instance] = nil
