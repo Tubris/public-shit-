@@ -396,6 +396,10 @@ local autoHeal = {
 	HealPending = false,
 	HealPendingUntil = 0,
 	HealEventUsed = 0,
+	HealEventBudget = 0,
+	HealLastQuantity = nil,
+	HealInFlight = 0,
+	HealSent = 0,
 	AutoDisconnectTimer = 0,
 	AutoDisconnectLastHealth = nil,
 	AutoDisconnectLastDamage = 0,
@@ -2149,6 +2153,11 @@ function updateAutoHeal(dt)
 		autoHeal.LastHealDrop = nil
 		autoHeal.HealPending = false
 		autoHeal.HealEventUsed = 0
+		autoHeal.HealEventBudget = 0
+		autoHeal.HealLastQuantity = nil
+		autoHeal.HealInFlight = 0
+		autoHeal.HealSent = 0
+		autoHeal.HealActive = false
 		return
 	end
 	autoHeal.Timer += dt
@@ -2168,20 +2177,36 @@ function updateAutoHeal(dt)
 		autoHeal.HealNotified = false
 		autoHeal.HealPending = false
 		autoHeal.HealEventUsed = 0
+		autoHeal.HealEventBudget = 0
+		autoHeal.HealLastQuantity = nil
+		autoHeal.HealInFlight = 0
+		autoHeal.HealSent = 0
+		autoHeal.HealActive = true
 	elseif autoHeal.LastActualHealth and actualHealth > autoHeal.LastActualHealth + 0.5 then
 		autoHeal.HealPending = false
 	end
 	autoHeal.LastActualHealth = actualHealth
-	if autoHeal.ExpectedHealth and now < autoHeal.ExpectedHealthUntil then
-		health = math.max(health, autoHeal.ExpectedHealth)
-	elseif autoHeal.ExpectedHealth then
+	if autoHeal.ExpectedHealth and now >= autoHeal.ExpectedHealthUntil then
 		autoHeal.ExpectedHealth = nil
 	end
-	if health > state.AutoHealHealth then
+	local maxHealthForStop = getLocalMaxHealth() or 100
+	if actualHealth < state.AutoHealHealth then
+		autoHeal.HealActive = true
+	end
+	if actualHealth >= maxHealthForStop - 0.5 then
 		autoHeal.HealNotified = false
 		autoHeal.LastHealDrop = nil
 		autoHeal.HealPending = false
 		autoHeal.HealEventUsed = 0
+		autoHeal.HealEventBudget = 0
+		autoHeal.HealLastQuantity = nil
+		autoHeal.HealInFlight = 0
+		autoHeal.HealSent = 0
+		autoHeal.HealActive = false
+		autoHeal.ExpectedHealth = nil
+		return
+	end
+	if not autoHeal.HealActive then
 		return
 	end
 	if autoHeal.HealPending and now < autoHeal.HealPendingUntil then
@@ -2191,27 +2216,18 @@ function updateAutoHeal(dt)
 	local slot, _, quantity = findBloodfruit()
 	local usedItem = "Blood Fruit"
 	if slot and quantity > 0 then
-		local targetHealth = math.min(state.AutoHealHealth, getLocalMaxHealth() or state.AutoHealHealth)
-		local eventDrop = autoHeal.LastHealDrop or actualHealth
-		local eventBudget = math.max(1, math.ceil((targetHealth - eventDrop) / 3))
-		local remainingBudget = eventBudget - (autoHeal.HealEventUsed or 0)
-		local amount = math.min(quantity, math.max(0, remainingBudget))
-		if amount <= 0 then
-			return
-		end
-		for _ = 1, amount do
-			pcall(function()
-				autoHeal.Packets.UseBagItem.send(slot)
-			end)
-		end
+		autoHeal.LastHealDrop = actualHealth
+		pcall(function()
+			autoHeal.Packets.UseBagItem.send(slot)
+		end)
 		autoHeal.LastUse = now
-		autoHeal.HealEventUsed = (autoHeal.HealEventUsed or 0) + amount
+		autoHeal.HealSent = 1
 		autoHeal.HealPending = true
-		autoHeal.HealPendingUntil = now + 3
-		autoHeal.ExpectedHealth = math.min(getLocalMaxHealth() or 100, actualHealth + amount * 3)
-		autoHeal.ExpectedHealthUntil = now + 1.75
+		autoHeal.HealPendingUntil = now + 0.025
+		autoHeal.ExpectedHealth = math.min(maxHealthForStop, actualHealth + 3)
+		autoHeal.ExpectedHealthUntil = now + 0.04
 		if not autoHeal.HealNotified then
-			notify("Auto Heal", string.format("Dropped to %d HP. Healed with %d Blood Fruit.", math.floor((autoHeal.LastHealDrop or actualHealth) + 0.5), amount))
+			notify("Auto Heal", string.format("Dropped to %d HP. Healing with Blood Fruit.", math.floor((autoHeal.LastHealDrop or actualHealth) + 0.5)))
 			autoHeal.HealNotified = true
 			autoHeal.LastHealNotify = now
 		end
