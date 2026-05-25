@@ -11,6 +11,7 @@ local S = {
 	HttpService = game:GetService("HttpService"),
 	Lighting = game:GetService("Lighting"),
 	StarterGui = game:GetService("StarterGui"),
+	VirtualUser = game:GetService("VirtualUser"),
 }
 
 local player = S.Players.LocalPlayer
@@ -101,6 +102,7 @@ local state = {
 	BloodFruitCounter = true,
 	AutoDisconnect = false,
 	AutoDisconnectRange = 300,
+	AntiIdle = true,
 	Fullbright = false,
 	SeeRecipe = false,
 	Dance = false,
@@ -429,8 +431,10 @@ local autoHeal = {
 	AuraScanTimer = 0,
 	AuraCandidates = {},
 	AuraRedraws = {},
-	CritterPositions = {},
-	CritterPositionTimer = 0,
+	MobAuraTargets = {},
+	MobAuraIds = {},
+	MobAuraParts = {},
+	MobAuraScanTimer = 0,
 	PlayerHitboxes = {},
 	WorldRainbowTimer = 0,
 	NoclipTimer = 0,
@@ -513,6 +517,7 @@ toggleDescriptions = {
 	["Black Screen"] = "Covers the game view in black while keeping this GUI usable.",
 	["Health Bar"] = "Shows the custom health bar.",
 	["Blood Fruit Count"] = "Shows your Blood Fruit amount above the health bar.",
+	["Anti Idle"] = "Prevents the 20 minute idle disconnect.",
 	["Auto Disconnect"] = "Disconnects if a player is within the selected range.",
 	["God/Tree Counter"] = "Shows break-time and respawn timers for gods/tree.",
 	["Island Rope Notifier"] = "Notifies when a player uses a rope, breaks it, and shows timer till respawn.",
@@ -3535,6 +3540,9 @@ function critterAuraEntityID(critter)
 	if not critter then
 		return nil
 	end
+	if autoHeal.MobAuraIds[critter] and critter.Parent then
+		return autoHeal.MobAuraIds[critter]
+	end
 	local function readID(obj)
 		if not obj then
 			return nil
@@ -3551,38 +3559,67 @@ function critterAuraEntityID(critter)
 	end
 	local id = readID(critter)
 	if id then
+		autoHeal.MobAuraIds[critter] = id
 		return id
 	end
 	if critter:IsA("Model") then
-		return readID(critter:FindFirstChild("HumanoidRootPart"))
+		id = readID(critter:FindFirstChild("HumanoidRootPart"))
 			or readID(critter.PrimaryPart)
 			or readID(critter:FindFirstChild("Part"))
+			or auraEntityID(critter)
+		autoHeal.MobAuraIds[critter] = id
+		return id
 	end
 	return nil
 end
 
-function mobAuraTargets(rootPosition)
-	local targets = {}
+function critterAuraPosition(critter)
+	if not critter or not critter.Parent then
+		return nil
+	end
+	if critter:IsA("BasePart") then
+		return critter.Position
+	end
+	local part = autoHeal.MobAuraParts[critter]
+	if not part or not part.Parent then
+		part = critter:FindFirstChild("HumanoidRootPart") or critter.PrimaryPart or critter:FindFirstChild("Part") or critter:FindFirstChildWhichIsA("BasePart")
+		autoHeal.MobAuraParts[critter] = part
+	end
+	if part then
+		return part.Position
+	end
+	return critter:IsA("Model") and critter:GetPivot().Position or nil
+end
+
+function refreshMobAuraTargets(rootPosition)
+	table.clear(autoHeal.MobAuraTargets)
 	local crittersFolder = workspace:FindFirstChild("Critters")
 	if not crittersFolder then
-		return targets
+		return
 	end
+	local bestTarget
+	local bestDistanceSq
 	for _, critter in ipairs(crittersFolder:GetChildren()) do
 		if critter:IsA("Model") or critter:IsA("BasePart") then
 			local entityID = critterAuraEntityID(critter)
-			local position, distanceSq = closestPartPosition(critter, rootPosition)
-			if entityID and position and distanceSq <= 3600 then
-				table.insert(targets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
+			local position = critterAuraPosition(critter)
+			local offset = position and rootPosition - position
+			local distanceSq = offset and offset:Dot(offset)
+			if entityID and position and distanceSq <= 1600 then
+				if not bestDistanceSq or distanceSq < bestDistanceSq then
+					bestDistanceSq = distanceSq
+					bestTarget = { EntityID = entityID, Position = position, DistanceSq = distanceSq }
+				end
 			end
 		end
 	end
-	table.sort(targets, function(a, b)
-		return a.DistanceSq < b.DistanceSq
-	end)
-	while #targets > 1 do
-		table.remove(targets)
+	if bestTarget then
+		table.insert(autoHeal.MobAuraTargets, bestTarget)
 	end
-	return targets
+end
+
+function mobAuraTargets()
+	return autoHeal.MobAuraTargets
 end
 
 function updateAuras(dt)
@@ -3594,6 +3631,11 @@ function updateAuras(dt)
 		if #autoHeal.AuraCandidates > 0 then
 			table.clear(autoHeal.AuraCandidates)
 		end
+		if #autoHeal.MobAuraTargets > 0 then
+			table.clear(autoHeal.MobAuraTargets)
+		end
+		table.clear(autoHeal.MobAuraIds)
+		table.clear(autoHeal.MobAuraParts)
 		restorePlayerAuraHitboxes()
 		return
 	end
@@ -3622,6 +3664,20 @@ function updateAuras(dt)
 			sendAuraAttack(weaponAuraTargets(root.Position), root)
 		end
 	end
+	if state.MobAura then
+		autoHeal.MobAuraScanTimer += dt
+		if autoHeal.MobAuraScanTimer >= 0.3 then
+			autoHeal.MobAuraScanTimer = 0
+			refreshMobAuraTargets(root.Position)
+		end
+	else
+		autoHeal.MobAuraScanTimer = 0
+		if #autoHeal.MobAuraTargets > 0 then
+			table.clear(autoHeal.MobAuraTargets)
+		end
+		table.clear(autoHeal.MobAuraIds)
+		table.clear(autoHeal.MobAuraParts)
+	end
 	if state.MineAura or state.MobAura then
 		autoHeal.FarmAuraTimer += dt
 		if autoHeal.FarmAuraTimer >= 0.1 then
@@ -3630,7 +3686,7 @@ function updateAuras(dt)
 				sendAuraAttack(auraTargets(root.Position, "Mine", 3), root)
 			end
 			if state.MobAura then
-				sendAuraAttack(mobAuraTargets(root.Position), root, true)
+				sendAuraAttack(mobAuraTargets(), root)
 			end
 		end
 	end
@@ -3645,6 +3701,9 @@ end
 function setAura(stateKey, value, label)
 	state[stateKey] = value
 	autoHeal.AuraScanTimer = 1
+	if stateKey == "MobAura" and value then
+		autoHeal.MobAuraScanTimer = 1
+	end
 	table.clear(autoHeal.AuraCandidates)
 	if stateKey == "WeaponAura" and not value then
 		restorePlayerAuraHitboxes()
@@ -6783,6 +6842,7 @@ createToggle(sections.Settings, "Auto Drop Stop (Farming)", function() return st
 end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
+createToggle(sections.Settings, "Anti Idle", function() return state.AntiIdle end, function(v) state.AntiIdle = v end)
 createToggle(sections.Settings, "Item Orbit", function() return state.ItemOrbit end, function(v)
 	state.ItemOrbit = v
 	autoHeal.OrbitLastTime = 0
@@ -7145,6 +7205,15 @@ connect(S.Players.PlayerRemoving, function(leaving)
 	if esp.Players[leaving] then
 		clearEsp({ [leaving] = esp.Players[leaving] })
 		esp.Players[leaving] = nil
+	end
+end)
+
+connect(player.Idled, function()
+	if state.AntiIdle then
+		pcall(function()
+			S.VirtualUser:CaptureController()
+			S.VirtualUser:ClickButton2(Vector2.new())
+		end)
 	end
 end)
 
