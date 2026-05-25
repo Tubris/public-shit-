@@ -51,8 +51,7 @@ function isLockedLabel(label)
 		or label == "Auto Drop"
 		or label == "Auto Harvest"
 		or label == "Auto Plant"
-		or label == "Tween Plant Boxes"
-		or label == "Tween Harvest"
+		or label == "Auto Farm"
 		or label == "Plant Box Visualizer"
 		or string.find(label, "AutoPlaceBox", 1, true) ~= nil
 		or label == "Abort AutoPlaceBox"
@@ -95,7 +94,9 @@ local state = {
 	PanelVisible = true,
 	Minimized = false,
 	Stats = true,
-	UncapFps = true,
+	FpsCapEnabled = true,
+	FpsCap = 361,
+	BlackScreen = false,
 	HealthBar = true,
 	BloodFruitCounter = true,
 	AutoDisconnect = false,
@@ -486,8 +487,7 @@ toggleDescriptions = {
 	["Item Orbit"] = "Pulls nearby items into an orbit around you.",
 	["Auto Harvest"] = "Harvests selected bushes near you.",
 	["Auto Plant"] = "Plants selected fruit in nearby empty plant boxes.",
-	["Tween Plant Boxes"] = "Tweens to empty plant boxes for farming.",
-	["Tween Harvest"] = "Tweens to selected bushes for harvesting.",
+	["Auto Farm"] = "Turns on Auto Plant and Auto Harvest, then tweens to empty plant boxes.",
 	["Plant Box Visualizer"] = "Shows where plant boxes would place without placing.",
 	Enabled = "Turns player ESP on.",
 	Names = "Shows ESP names.",
@@ -507,7 +507,8 @@ toggleDescriptions = {
 	["Ant Hill ESP"] = "Shows ant hill/mound ESP.",
 	["Totem ESP"] = "Shows tribe totem ESP with health.",
 	["Performance Stats"] = "Shows FPS, player count, and ping.",
-	["Uncap FPS"] = "Attempts to uncap FPS with executor support.",
+	["FPS Cap"] = "Caps FPS to the slider value. Past 360 is infinite.",
+	["Black Screen"] = "Covers the game view in black while keeping this GUI usable.",
 	["Health Bar"] = "Shows the custom health bar.",
 	["Blood Fruit Count"] = "Shows your Blood Fruit amount above the health bar.",
 	["Auto Disconnect"] = "Disconnects if a player is within the selected range.",
@@ -517,6 +518,25 @@ toggleDescriptions = {
 	Dance = "Loops the selected dance emote.",
 	["See Recipe"] = "Shows recipes as level 100 while blocking too-low crafts.",
 	Freecam = "Toggles freecam with scroll-wheel speed control.",
+}
+toggleManualNotify = {
+	["Weapon Aura"] = true,
+	["Mine Aura"] = true,
+	["Mob Aura"] = true,
+	["Chest Place"] = true,
+	["Auto Heal"] = true,
+	["Heal Fallback"] = true,
+	["Auto Pickup"] = true,
+	["Auto Plant"] = true,
+	["Auto Farm"] = true,
+	["Plant Box Visualizer"] = true,
+	Entities = true,
+	["God ESP"] = true,
+	["Item Orbit"] = true,
+	["Auto Disconnect"] = true,
+	["Auto Load Config"] = true,
+	["See Recipe"] = true,
+	Freecam = true,
 }
 local danceEmotes = {
 	["Irish Jig"] = 3333432454,
@@ -636,7 +656,9 @@ end
 
 function applyFpsCap()
 	if typeof(setfpscap) == "function" then
-		pcall(setfpscap, state.UncapFps and 0 or 240)
+		if state.FpsCapEnabled then
+			pcall(setfpscap, state.FpsCap > 360 and 0 or state.FpsCap)
+		end
 	end
 end
 
@@ -655,6 +677,15 @@ function stroke(parent, color, transparency, thickness)
 	end
 	return outline
 end
+
+blackScreenFrame = make("Frame", {
+	Name = "BlackScreenOverlay",
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+	BorderSizePixel = 0,
+	Visible = state.BlackScreen,
+	ZIndex = 0,
+}, screenGui)
 
 function getCharacterParts()
 	character = player.Character
@@ -867,8 +898,8 @@ local healthText = make("TextLabel", {
 local bloodFruitCounter = themeRegister(make("TextLabel", {
 	Name = "BloodFruitCounter",
 	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, -0.18, 0),
-	Size = UDim2.new(1.35, 0, 0, 15),
+	Position = UDim2.new(0.5, 0, 0.800000012, -3),
+	Size = UDim2.new(0.17, 0, 0, 15),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBold,
 	Text = "Blood Fruit: 0",
@@ -876,7 +907,7 @@ local bloodFruitCounter = themeRegister(make("TextLabel", {
 	TextSize = 10,
 	TextStrokeTransparency = 0.35,
 	ZIndex = 82,
-}, healthBar), "TextColor3", 0.42, 1)
+}, screenGui), "TextColor3", 0.42, 1)
 
 function layoutNotifications()
 	local yOffset = 24
@@ -1370,7 +1401,7 @@ function createToggle(parent, label, getValue, setValue)
 		end
 		local nextValue = not getValue()
 		setValue(nextValue)
-		if nextValue and toggleDescriptions[label] then
+		if nextValue and toggleDescriptions[label] and not toggleManualNotify[label] then
 			notify(label, toggleDescriptions[label])
 		end
 		redraw()
@@ -1433,7 +1464,8 @@ function createSlider(parent, label, min, max, getValue, setValue)
 	local function redraw()
 		local value = math.clamp(getValue(), min, max)
 		local alpha = (value - min) / (max - min)
-		labelText.Text = string.format("%s: %s", label, tostring(value))
+		local displayValue = label == "FPS Cap" and value > 360 and "Infinite" or tostring(value)
+		labelText.Text = string.format("%s: %s", label, displayValue)
 		fill.Size = UDim2.new(alpha, 0, 1, 0)
 		knob.Position = UDim2.new(alpha, -10, 0, 22)
 	end
@@ -2955,25 +2987,10 @@ function startFarmTweenLoop()
 	end
 	autoHeal.FarmTweenLoop = true
 	task.spawn(function()
-		while screenGui.Parent and (state.TweenPlantBoxes or state.TweenHarvest) do
+		while screenGui.Parent and state.TweenPlantBoxes do
 			local _, hum, root = getCharacterParts()
 			if hum and hum.Health > 0 and root then
-				if state.TweenPlantBoxes then
-					farmTweenTo(root, nearestEmptyPlantBox(root, state.TweenCheckDistance))
-				end
-				if state.TweenHarvest then
-					for _, bush in ipairs(getHarvestBushes(root, state.TweenCheckDistance)) do
-						if not state.TweenHarvest then
-							break
-						end
-						local _, currentHum, currentRoot = getCharacterParts()
-						if not currentHum or currentHum.Health <= 0 or not currentRoot then
-							break
-						end
-						farmTweenTo(currentRoot, bush.Position)
-						task.wait(0.5)
-					end
-				end
+				farmTweenTo(root, nearestEmptyPlantBox(root, state.TweenCheckDistance))
 			end
 			task.wait(1)
 		end
@@ -5825,7 +5842,7 @@ function updateHealthBar()
 end
 
 function updateBloodFruitCounter()
-	bloodFruitCounter.Visible = state.HealthBar and state.BloodFruitCounter
+	bloodFruitCounter.Visible = state.BloodFruitCounter
 	if not bloodFruitCounter.Visible then
 		return
 	end
@@ -6611,10 +6628,10 @@ createToggle(sections.AutoPickup, "Pickup Essence", function() return state.Pick
 end)
 
 sections.AutoFarm = section(autoPage, "Farming")
-createToggle(sections.AutoFarm, "Auto Harvest", function() return state.AutoHarvest end, function(v)
+autoHeal.AutoHarvestRedraw = createToggle(sections.AutoFarm, "Auto Harvest", function() return state.AutoHarvest end, function(v)
 	state.AutoHarvest = v
 end)
-createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant end, function(v)
+autoHeal.AutoPlantRedraw = createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant end, function(v)
 	state.AutoPlant = v
 	if v then
 		local equipped, hoeName, status = equipHoeForAutoPlant()
@@ -6625,24 +6642,22 @@ createToggle(sections.AutoFarm, "Auto Plant", function() return state.AutoPlant 
 		end
 	end
 end)
-createToggle(sections.AutoFarm, "Tween Plant Boxes", function() return state.TweenPlantBoxes end, function(v)
+createToggle(sections.AutoFarm, "Auto Farm", function() return state.TweenPlantBoxes end, function(v)
 	state.TweenPlantBoxes = v
+	state.TweenHarvest = false
 	if v then
-		notify("Tween Plant Boxes", "Make sure Auto Plant and Auto Harvest is enabled. Check Settings tab for Auto Disconnect.")
+		state.AutoHarvest = true
+		state.AutoPlant = true
+		if autoHeal.AutoHarvestRedraw then
+			autoHeal.AutoHarvestRedraw()
+		end
+		if autoHeal.AutoPlantRedraw then
+			autoHeal.AutoPlantRedraw()
+		end
+		equipHoeForAutoPlant()
+		notify("Auto Farm", "Auto Plant and Auto Harvest enabled. Check Settings tab for Auto Disconnect.")
 		startFarmTweenLoop()
 	end
-end)
-createToggle(sections.AutoFarm, "Tween Harvest", function() return state.TweenHarvest end, function(v)
-	state.TweenHarvest = v
-	if v then
-		startFarmTweenLoop()
-	end
-end)
-createChoiceDropdown(sections.AutoFarm, "Bush Name", collectBushNames, function()
-	return state.BushName
-end, function(value)
-	state.BushName = value
-	state.AutoPlantItem = value
 end)
 createSlider(sections.AutoFarm, "Tween Check Distance", 50, 1000, function() return state.TweenCheckDistance end, function(v)
 	state.TweenCheckDistance = v
@@ -6736,9 +6751,17 @@ createSlider(sections.WorldOptions, "Text Size", 10, 28, function() return state
 
 sections.Settings = section(settingsPage, "Interface")
 createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
-createToggle(sections.Settings, "Uncap FPS", function() return state.UncapFps end, function(v)
-	state.UncapFps = v
+createToggle(sections.Settings, "FPS Cap", function() return state.FpsCapEnabled end, function(v)
+	state.FpsCapEnabled = v
 	applyFpsCap()
+end)
+createSlider(sections.Settings, "FPS Cap", 1, 361, function() return state.FpsCap end, function(v)
+	state.FpsCap = v
+	applyFpsCap()
+end)
+createToggle(sections.Settings, "Black Screen", function() return state.BlackScreen end, function(v)
+	state.BlackScreen = v
+	blackScreenFrame.Visible = v
 end)
 createToggle(sections.Settings, "Health Bar", function() return state.HealthBar end, function(v) state.HealthBar = v end)
 createToggle(sections.Settings, "Blood Fruit Count", function() return state.BloodFruitCounter end, function(v) state.BloodFruitCounter = v end)
