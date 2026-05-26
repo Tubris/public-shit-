@@ -238,12 +238,15 @@ local selections = {
 		Bluefruit = true,
 		Coconut = true,
 		Oddberry = true,
+		Strawberry = true,
+		Sunfruit = true,
+		Watermelon = true,
 		Jelly = false,
 		["Blood Fruit"] = false,
 	},
 }
 
-local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Strawberry", "Jelly", "Blood Fruit" }
+local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Strawberry", "Sunfruit", "Watermelon", "Jelly", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
 local oreFallbackColors = {
@@ -430,6 +433,7 @@ local autoHeal = {
 	FarmAuraTimer = 0,
 	AuraScanTimer = 0,
 	AuraCandidates = {},
+	AuraSeen = {},
 	AuraRedraws = {},
 	MobAuraTargets = {},
 	MobAuraIds = {},
@@ -3540,37 +3544,11 @@ function critterAuraEntityID(critter)
 	if not critter then
 		return nil
 	end
-	if autoHeal.MobAuraIds[critter] and critter.Parent then
-		return autoHeal.MobAuraIds[critter]
-	end
-	local function readID(obj)
-		if not obj then
-			return nil
-		end
-		local id = obj:GetAttribute("EntityID") or obj:GetAttribute("EntityId") or obj:GetAttribute("entityID") or obj:GetAttribute("entityId")
-		if id then
-			return id
-		end
-		local value = obj:FindFirstChild("EntityID") or obj:FindFirstChild("EntityId") or obj:FindFirstChild("entityID") or obj:FindFirstChild("entityId")
-		if value and value:IsA("ValueBase") then
-			return value.Value
-		end
-		return nil
-	end
-	local id = readID(critter)
+	local id = auraEntityID(critter)
 	if id then
 		autoHeal.MobAuraIds[critter] = id
-		return id
 	end
-	if critter:IsA("Model") then
-		id = readID(critter:FindFirstChild("HumanoidRootPart"))
-			or readID(critter.PrimaryPart)
-			or readID(critter:FindFirstChild("Part"))
-			or auraEntityID(critter)
-		autoHeal.MobAuraIds[critter] = id
-		return id
-	end
-	return nil
+	return id
 end
 
 function critterAuraPosition(critter)
@@ -3582,7 +3560,7 @@ function critterAuraPosition(critter)
 	end
 	local part = autoHeal.MobAuraParts[critter]
 	if not part or not part.Parent then
-		part = critter:FindFirstChild("HumanoidRootPart") or critter.PrimaryPart or critter:FindFirstChild("Part") or critter:FindFirstChildWhichIsA("BasePart")
+		part = critter.PrimaryPart or critter:FindFirstChild("HumanoidRootPart", true) or critter:FindFirstChild("Part", true) or critter:FindFirstChildWhichIsA("BasePart", true)
 		autoHeal.MobAuraParts[critter] = part
 	end
 	if part then
@@ -3597,24 +3575,26 @@ function refreshMobAuraTargets(rootPosition)
 	if not crittersFolder then
 		return
 	end
-	local bestTarget
-	local bestDistanceSq
-	for _, critter in ipairs(crittersFolder:GetChildren()) do
-		if critter:IsA("Model") or critter:IsA("BasePart") then
-			local entityID = critterAuraEntityID(critter)
-			local position = critterAuraPosition(critter)
-			local offset = position and rootPosition - position
-			local distanceSq = offset and offset:Dot(offset)
-			if entityID and position and distanceSq <= 1600 then
-				if not bestDistanceSq or distanceSq < bestDistanceSq then
-					bestDistanceSq = distanceSq
-					bestTarget = { EntityID = entityID, Position = position, DistanceSq = distanceSq }
+	for _, holder in ipairs(crittersFolder:GetChildren()) do
+		for _, critter in ipairs((holder:IsA("Folder") and holder:GetChildren()) or { holder }) do
+			if critter:IsA("Model") or critter:IsA("BasePart") then
+				local entityID = critterAuraEntityID(critter)
+				local position = critterAuraPosition(critter)
+				local offset = position and rootPosition - position
+				local distanceSq = offset and offset:Dot(offset)
+				if entityID and position and distanceSq <= 3600 then
+					table.insert(autoHeal.MobAuraTargets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
+					local index = #autoHeal.MobAuraTargets
+					while index > 1 and autoHeal.MobAuraTargets[index].DistanceSq < autoHeal.MobAuraTargets[index - 1].DistanceSq do
+						autoHeal.MobAuraTargets[index], autoHeal.MobAuraTargets[index - 1] = autoHeal.MobAuraTargets[index - 1], autoHeal.MobAuraTargets[index]
+						index -= 1
+					end
+					if #autoHeal.MobAuraTargets > 3 then
+						table.remove(autoHeal.MobAuraTargets)
+					end
 				end
 			end
 		end
-	end
-	if bestTarget then
-		table.insert(autoHeal.MobAuraTargets, bestTarget)
 	end
 end
 
@@ -3666,7 +3646,7 @@ function updateAuras(dt)
 	end
 	if state.MobAura then
 		autoHeal.MobAuraScanTimer += dt
-		if autoHeal.MobAuraScanTimer >= 0.3 then
+		if autoHeal.MobAuraScanTimer >= 0.15 then
 			autoHeal.MobAuraScanTimer = 0
 			refreshMobAuraTargets(root.Position)
 		end
