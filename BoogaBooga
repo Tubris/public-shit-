@@ -445,6 +445,7 @@ local autoHeal = {
 	NoclipTimer = 0,
 	RopeTimer = 0,
 	RopeTouching = {},
+	RopeTouchNotify = {},
 	RopeStates = {},
 	RopeRespawns = {},
 	ItemIDs = nil,
@@ -455,6 +456,14 @@ local autoHeal = {
 	FarmTweenLoop = false,
 	DropTimer = 0,
 	DropIndex = 1,
+	DropEstimateLastRemaining = nil,
+	DropEstimateLastTime = 0,
+	DropEstimateRate = nil,
+	DropEstimateSeconds = nil,
+	DropEstimateDisplayTime = 0,
+	DropEstimateTickTime = 0,
+	DropEstimateNoChangeSince = 0,
+	DropEstimateLabel = "",
 	DropPacket = nil,
 	DropOrder = {},
 	GodCounters = {},
@@ -1326,13 +1335,13 @@ function section(parent, heading)
 	return box
 end
 
-function createToggle(parent, label, getValue, setValue)
+function createToggle(parent, label, getValue, setValue, getLabelText)
 	local row = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 30),
 		BackgroundTransparency = 1,
 	}, parent)
 
-	make("TextLabel", {
+	local labelObject = make("TextLabel", {
 		Size = UDim2.new(1, -58, 1, 0),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.Gotham,
@@ -1396,6 +1405,7 @@ function createToggle(parent, label, getValue, setValue)
 	end
 	local function redraw()
 		local on = getValue()
+		labelObject.Text = getLabelText and getLabelText() or label
 		tween(button, nil, {
 			BackgroundColor3 = on and themeColor(0.84, 0.78) or Color3.fromRGB(52, 42, 76),
 			BackgroundTransparency = on and 0.02 or 0.16,
@@ -2418,7 +2428,7 @@ function updateAutoHunger(dt)
 			local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
 			local item = inventory and autoHeal.HungerPendingSlot and inventory[autoHeal.HungerPendingSlot]
 			local left = item and (tonumber(item.quantity) or 0) or 0
-			notify("Auto Hunger", string.format("Ate %s (+%.1f hunger). Left: %d", autoHeal.HungerPendingFood, hunger - autoHeal.HungerPendingValue, left))
+			notify("Auto Hunger", string.format("Ate %s (+%d hunger). Left: %d", autoHeal.HungerPendingFood, math.floor((hunger - autoHeal.HungerPendingValue) + 0.5), left))
 			autoHeal.HungerPendingFood = nil
 			autoHeal.HungerPendingSlot = nil
 		elseif os.clock() - autoHeal.HungerPendingTime > 4 then
@@ -2853,8 +2863,99 @@ function inventoryQuantity(itemName)
 	return total
 end
 
+function formatShortTime(seconds)
+	seconds = math.max(0, math.floor((seconds or 0) + 0.5))
+	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
+end
+
+function autoDropToggleLabel()
+	return autoHeal.DropEstimateLabel ~= "" and ("Auto Drop - " .. autoHeal.DropEstimateLabel) or "Auto Drop"
+end
+
+function resetAutoDropEstimate(keepLabel)
+	autoHeal.DropEstimateLastRemaining = nil
+	autoHeal.DropEstimateLastTime = 0
+	autoHeal.DropEstimateRate = nil
+	autoHeal.DropEstimateSeconds = nil
+	autoHeal.DropEstimateDisplayTime = 0
+	autoHeal.DropEstimateTickTime = 0
+	autoHeal.DropEstimateNoChangeSince = 0
+	if not keepLabel then
+		autoHeal.DropEstimateLabel = ""
+	end
+	if autoDropToggleRedraw then
+		autoDropToggleRedraw()
+	end
+end
+
+function updateAutoDropEstimate(remaining)
+	if not state.AutoDrop or state.AutoDropStopFarming or remaining <= 0 then
+		if autoHeal.DropEstimateLabel ~= "" then
+			resetAutoDropEstimate(false)
+		end
+		return
+	end
+	local now = os.clock()
+	local tickElapsed = autoHeal.DropEstimateTickTime > 0 and math.max(now - autoHeal.DropEstimateTickTime, 0) or 0
+	autoHeal.DropEstimateTickTime = now
+	if autoHeal.DropEstimateLastRemaining and remaining < autoHeal.DropEstimateLastRemaining then
+		local elapsed = math.max(now - autoHeal.DropEstimateLastTime, 0.001)
+		local rate = (autoHeal.DropEstimateLastRemaining - remaining) / elapsed
+		autoHeal.DropEstimateRate = autoHeal.DropEstimateRate and (autoHeal.DropEstimateRate * 0.85 + rate * 0.15) or rate
+		autoHeal.DropEstimateLastTime = now
+		autoHeal.DropEstimateNoChangeSince = now
+	elseif not autoHeal.DropEstimateLastRemaining or remaining > autoHeal.DropEstimateLastRemaining then
+		autoHeal.DropEstimateLastTime = now
+		autoHeal.DropEstimateNoChangeSince = now
+	elseif autoHeal.DropEstimateNoChangeSince == 0 then
+		autoHeal.DropEstimateNoChangeSince = now
+	end
+	autoHeal.DropEstimateLastRemaining = remaining
+	if autoHeal.DropEstimateRate and now - autoHeal.DropEstimateNoChangeSince > 3 then
+		autoHeal.DropEstimateRate = nil
+		autoHeal.DropEstimateSeconds = nil
+		if autoHeal.DropEstimateLabel ~= "..." then
+			autoHeal.DropEstimateLabel = "..."
+			if autoDropToggleRedraw then
+				autoDropToggleRedraw()
+			end
+		end
+		return
+	end
+	if not autoHeal.DropEstimateRate then
+		if autoHeal.DropEstimateLabel ~= "..." then
+			autoHeal.DropEstimateLabel = "..."
+			if autoDropToggleRedraw then
+				autoDropToggleRedraw()
+			end
+		end
+		return
+	end
+	local rate = autoHeal.DropEstimateRate
+	local rawSeconds = remaining / math.max(rate, 0.001)
+	local seconds = rawSeconds
+	if autoHeal.DropEstimateSeconds then
+		seconds = math.min(rawSeconds, math.max(1, autoHeal.DropEstimateSeconds - tickElapsed))
+	end
+	autoHeal.DropEstimateSeconds = seconds
+	local label = formatShortTime(seconds)
+	if label ~= autoHeal.DropEstimateLabel then
+		autoHeal.DropEstimateLabel = label
+		autoHeal.DropEstimateDisplayTime = now
+		if autoDropToggleRedraw then
+			autoDropToggleRedraw()
+		end
+	end
+end
+
 function updateAutoDrop(dt)
 	if not state.AutoDrop then
+		if autoHeal.DropEstimateLabel ~= "" then
+			autoHeal.DropEstimateLabel = ""
+			if autoDropToggleRedraw then
+				autoDropToggleRedraw()
+			end
+		end
 		return
 	end
 	autoHeal.DropTimer += dt
@@ -2874,12 +2975,15 @@ function updateAutoDrop(dt)
 		return
 	end
 	local slots = {}
+	local remaining = 0
 	local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
 	for slot, item in pairs(inventory or {}) do
-		if item and item.name and selections.AutoDrop[item.name] and (tonumber(item.quantity) or 0) > 0 then
+		if item and item.name and item.name ~= "Rock" and selections.AutoDrop[item.name] and (tonumber(item.quantity) or 0) > 0 then
 			slots[item.name] = slot
+			remaining += tonumber(item.quantity) or 0
 		end
 	end
+	updateAutoDropEstimate(remaining)
 	local names = {}
 	for _, name in ipairs(autoHeal.DropOrder) do
 		if slots[name] then
@@ -2903,6 +3007,7 @@ function updateAutoDrop(dt)
 		if state.AutoDropStopFarming then
 			return
 		end
+		updateAutoDropEstimate(0)
 		notify("Auto Drop", "Finished dropping selected items.")
 		state.AutoDrop = false
 		if autoDropToggleRedraw then
@@ -2913,14 +3018,15 @@ function updateAutoDrop(dt)
 	if autoHeal.DropIndex > #names then
 		autoHeal.DropIndex = 1
 	end
-	local itemName = names[autoHeal.DropIndex]
-	local slot = slots[itemName]
-	autoHeal.DropIndex = autoHeal.DropIndex % #names + 1
-	if slot then
-		pcall(function()
-			packet.send(slot)
-		end)
+	for _, itemName in ipairs(names) do
+		local slot = slots[itemName]
+		if slot then
+			pcall(function()
+				packet.send(slot)
+			end)
+		end
 	end
+	autoHeal.DropIndex = 1
 end
 
 function selectedPlantItemID()
@@ -5340,7 +5446,7 @@ function godCounterText(instance, health)
 	local now = os.clock()
 	local data = autoHeal.GodCounters[instance]
 	if not data then
-		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0, Samples = { { Time = now, Health = health } } }
+		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0, EtaSeconds = nil, EtaTickTime = 0, Samples = { { Time = now, Health = health } } }
 		return string.format("Health: %d", math.floor(health + 0.5))
 	end
 
@@ -5349,6 +5455,8 @@ function godCounterText(instance, health)
 	elseif health > data.LastHealth then
 		data.Rate = 0
 		data.LastDamageTime = 0
+		data.EtaSeconds = nil
+		data.EtaTickTime = 0
 		data.Samples = {}
 	end
 	data.LastHealth = health
@@ -5360,17 +5468,24 @@ function godCounterText(instance, health)
 	local oldest = data.Samples[1]
 	if oldest and oldest.Health > health then
 		local window = math.max(now - oldest.Time, 0.001)
-		data.Rate = (oldest.Health - health) / window
+		local rate = (oldest.Health - health) / window
+		data.Rate = data.Rate > 0 and (data.Rate * 0.72 + rate * 0.28) or rate
 	end
 
 	if data.Rate > 0 and now - data.LastDamageTime <= 4 then
+		local elapsed = data.EtaTickTime > 0 and math.max(now - data.EtaTickTime, 0) or 0
+		data.EtaTickTime = now
+		local rawSeconds = health / data.Rate
+		data.EtaSeconds = data.EtaSeconds and math.min(rawSeconds, math.max(1, data.EtaSeconds - elapsed)) or rawSeconds
 		if not data.EtaText or now - data.LastEtaUpdate >= 1 then
-			data.EtaText = formatEta(health / data.Rate)
+			data.EtaText = formatEta(data.EtaSeconds)
 			data.LastEtaUpdate = now
 		end
 		return string.format("Health: %d | %s", math.floor(health + 0.5), data.EtaText)
 	end
 	data.EtaText = nil
+	data.EtaSeconds = nil
+	data.EtaTickTime = 0
 	return string.format("Health: %d", math.floor(health + 0.5))
 end
 
@@ -6061,6 +6176,7 @@ end
 function updateIslandRopeNotifier(dt)
 	if not state.IslandRopeNotifier then
 		table.clear(autoHeal.RopeTouching)
+		table.clear(autoHeal.RopeTouchNotify)
 		for _, data in pairs(autoHeal.RopeRespawns) do
 			if data.Billboard then
 				data.Billboard.Enabled = false
@@ -6142,7 +6258,10 @@ function updateIslandRopeNotifier(dt)
 						active[id] = true
 						if not autoHeal.RopeTouching[id] then
 							autoHeal.RopeTouching[id] = true
-							notify("Island Rope", "player " .. model.Name .. " Is walking up " .. rope.Name .. " Island Rope")
+							if not autoHeal.RopeTouchNotify[id] or now - autoHeal.RopeTouchNotify[id] >= 30 then
+								autoHeal.RopeTouchNotify[id] = now
+								notify("Island Rope", "player " .. model.Name .. " Is walking up " .. rope.Name .. " Island Rope")
+							end
 						end
 					end
 				end
@@ -6301,15 +6420,34 @@ function collectInventoryNames()
 	local names = {}
 	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
 		for _, item in pairs(autoHeal.GameUtil.Data.inventory) do
-			if item and item.name and item.quantity and item.quantity > 0 and item.name ~= "Pleb Chest" then
+			if item and item.name and item.quantity and item.quantity > 0 and item.name ~= "Pleb Chest" and item.name ~= "Rock" then
 				names[item.name] = true
 				if selections.AutoDrop[item.name] == nil then
-					selections.AutoDrop[item.name] = string.find(string.lower(item.name), "raw", 1, true) ~= nil or item.name == "Steel Mix"
+					selections.AutoDrop[item.name] = isDefaultAutoDropItem(item.name)
+				end
+				if selections.AutoDrop[item.name] then
+					local found = false
+					for _, existingName in ipairs(autoHeal.DropOrder) do
+						found = found or existingName == item.name
+					end
+					if not found then
+						table.insert(autoHeal.DropOrder, item.name)
+					end
 				end
 			end
 		end
 	end
 	return sortedKeys(names)
+end
+
+function resetAutoDropDefaults()
+	table.clear(selections.AutoDrop)
+	table.clear(autoHeal.DropOrder)
+	collectInventoryNames()
+end
+
+function isDefaultAutoDropItem(itemName)
+	return itemName == "Steel Mix" or string.match(itemName, "^Raw%s") ~= nil
 end
 
 function canUseConfigFiles()
@@ -6450,9 +6588,7 @@ function buildConfigData()
 			Portal = selections.Portal,
 			Dropped = selections.Dropped,
 			Food = selections.Food,
-			AutoDrop = selections.AutoDrop,
 		},
-		DropOrder = autoHeal.DropOrder,
 	}
 end
 
@@ -6469,7 +6605,7 @@ function applyConfigData(data)
 	end
 	if type(data.Selections) == "table" then
 		for bucketName, bucketData in pairs(data.Selections) do
-			if selections[bucketName] and type(bucketData) == "table" then
+			if bucketName ~= "AutoDrop" and selections[bucketName] and type(bucketData) == "table" then
 				table.clear(selections[bucketName])
 				for key, value in pairs(bucketData) do
 					selections[bucketName][key] = value == true
@@ -6477,14 +6613,7 @@ function applyConfigData(data)
 			end
 		end
 	end
-	if type(data.DropOrder) == "table" then
-		table.clear(autoHeal.DropOrder)
-		for _, name in ipairs(data.DropOrder) do
-			if type(name) == "string" then
-				table.insert(autoHeal.DropOrder, name)
-			end
-		end
-	end
+	resetAutoDropDefaults()
 	applyGuiTheme()
 	applyCharacterSettings()
 	updateWorldEsp()
@@ -6704,9 +6833,11 @@ autoDropToggleRedraw = createToggle(sections.AutoDrop, "Auto Drop", function() r
 	state.AutoDrop = v
 	autoHeal.DropTimer = 0
 	autoHeal.DropIndex = 1
-end)
+	resetAutoDropEstimate(false)
+end, autoDropToggleLabel)
 createSlider(sections.AutoDrop, "Drop Delay MS", 1, 1000, function() return state.AutoDropDelay end, function(v)
 	state.AutoDropDelay = v
+	resetAutoDropEstimate(true)
 end)
 createFilterDropdown(sections.AutoDrop, "Drop Items", collectInventoryNames, selections.AutoDrop, false, true)
 
