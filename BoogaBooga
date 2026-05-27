@@ -431,6 +431,7 @@ local autoHeal = {
 	AuraTimer = 0,
 	WeaponAuraTimer = 0,
 	FarmAuraTimer = 0,
+	FarmAuraTurn = "Mob",
 	AuraScanTimer = 0,
 	AuraCandidates = {},
 	AuraSeen = {},
@@ -3509,7 +3510,7 @@ function sendAuraAttackDirect(targets, cf, timestamp)
 	return ok
 end
 
-function sendAuraAttack(targets, root, useRootCFrame)
+function sendAuraAttack(targets, root, useRootCFrame, useFullLook, packetFirst)
 	if not targets or #targets == 0 then
 		return
 	end
@@ -3519,12 +3520,21 @@ function sendAuraAttack(targets, root, useRootCFrame)
 		return
 	end
 	local flat = Vector3.new(direction.X, 0, direction.Z)
-	local spoofedCFrame = useRootCFrame and root.CFrame or flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
+	local spoofedCFrame = useRootCFrame and root.CFrame or useFullLook and CFrame.lookAt(root.Position, closest.Position) or flat.Magnitude > 0 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
 	local entityList = {}
 	for _, target in ipairs(targets) do
 		table.insert(entityList, { entityID = target.EntityID, buffer = nil })
 	end
 	local timestamp = workspace:GetServerTimeNow()
+	if packetFirst and autoHeal.Packets and autoHeal.Packets.SwingTool then
+		pcall(function()
+			autoHeal.Packets.SwingTool.send({
+				entityIDs = entityList,
+				cframe = spoofedCFrame,
+				timestamp = timestamp,
+			})
+		end)
+	end
 	if sendAuraAttackDirect(targets, spoofedCFrame, timestamp) then
 		return
 	end
@@ -3544,7 +3554,7 @@ function critterAuraEntityID(critter)
 	if not critter then
 		return nil
 	end
-	local id = auraEntityID(critter)
+	local id = critter:GetAttribute("EntityID") or critter:GetAttribute("EntityId") or critter:GetAttribute("entityID") or critter:GetAttribute("entityId") or auraEntityID(critter)
 	if id then
 		autoHeal.MobAuraIds[critter] = id
 	end
@@ -3558,6 +3568,13 @@ function critterAuraPosition(critter)
 	if critter:IsA("BasePart") then
 		return critter.Position
 	end
+	if critter:IsA("Model") then
+		return critter:GetPivot().Position
+	end
+	if critter:IsA("Folder") then
+		local part = critter:FindFirstChild("HumanoidRootPart", true) or critter:FindFirstChild("Part", true) or critter:FindFirstChildWhichIsA("BasePart", true)
+		return part and part.Position or nil
+	end
 	local part = autoHeal.MobAuraParts[critter]
 	if not part or not part.Parent then
 		part = critter.PrimaryPart or critter:FindFirstChild("HumanoidRootPart", true) or critter:FindFirstChild("Part", true) or critter:FindFirstChildWhichIsA("BasePart", true)
@@ -3569,32 +3586,40 @@ function critterAuraPosition(critter)
 	return critter:IsA("Model") and critter:GetPivot().Position or nil
 end
 
+function addMobAuraTarget(critter, rootPosition)
+	if not critter or (not critter:IsA("Model") and not critter:IsA("BasePart") and not critter:IsA("Folder")) then
+		return
+	end
+	local entityID = critterAuraEntityID(critter)
+	if not entityID or autoHeal.AuraSeen[entityID] then
+		return
+	end
+	local position = critterAuraPosition(critter)
+	local offset = position and rootPosition - position
+	local distanceSq = offset and offset:Dot(offset)
+	if position and distanceSq <= 6400 then
+		autoHeal.AuraSeen[entityID] = true
+		table.insert(autoHeal.MobAuraTargets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
+		local index = #autoHeal.MobAuraTargets
+		while index > 1 and autoHeal.MobAuraTargets[index].DistanceSq < autoHeal.MobAuraTargets[index - 1].DistanceSq do
+			autoHeal.MobAuraTargets[index], autoHeal.MobAuraTargets[index - 1] = autoHeal.MobAuraTargets[index - 1], autoHeal.MobAuraTargets[index]
+			index -= 1
+		end
+		if #autoHeal.MobAuraTargets > 1 then
+			table.remove(autoHeal.MobAuraTargets)
+		end
+	end
+end
+
 function refreshMobAuraTargets(rootPosition)
 	table.clear(autoHeal.MobAuraTargets)
 	local crittersFolder = workspace:FindFirstChild("Critters")
 	if not crittersFolder then
 		return
 	end
-	for _, holder in ipairs(crittersFolder:GetChildren()) do
-		for _, critter in ipairs((holder:IsA("Folder") and holder:GetChildren()) or { holder }) do
-			if critter:IsA("Model") or critter:IsA("BasePart") then
-				local entityID = critterAuraEntityID(critter)
-				local position = critterAuraPosition(critter)
-				local offset = position and rootPosition - position
-				local distanceSq = offset and offset:Dot(offset)
-				if entityID and position and distanceSq <= 3600 then
-					table.insert(autoHeal.MobAuraTargets, { EntityID = entityID, Position = position, DistanceSq = distanceSq })
-					local index = #autoHeal.MobAuraTargets
-					while index > 1 and autoHeal.MobAuraTargets[index].DistanceSq < autoHeal.MobAuraTargets[index - 1].DistanceSq do
-						autoHeal.MobAuraTargets[index], autoHeal.MobAuraTargets[index - 1] = autoHeal.MobAuraTargets[index - 1], autoHeal.MobAuraTargets[index]
-						index -= 1
-					end
-					if #autoHeal.MobAuraTargets > 3 then
-						table.remove(autoHeal.MobAuraTargets)
-					end
-				end
-			end
-		end
+	table.clear(autoHeal.AuraSeen)
+	for _, critter in ipairs(crittersFolder:GetChildren()) do
+		addMobAuraTarget(critter, rootPosition)
 	end
 end
 
@@ -3637,19 +3662,8 @@ function updateAuras(dt)
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
 	end
-	if state.WeaponAura then
-		autoHeal.WeaponAuraTimer += dt
-		if autoHeal.WeaponAuraTimer >= 0.12 then
-			autoHeal.WeaponAuraTimer = 0
-			sendAuraAttack(weaponAuraTargets(root.Position), root)
-		end
-	end
 	if state.MobAura then
-		autoHeal.MobAuraScanTimer += dt
-		if autoHeal.MobAuraScanTimer >= 0.15 then
-			autoHeal.MobAuraScanTimer = 0
-			refreshMobAuraTargets(root.Position)
-		end
+		autoHeal.MobAuraScanTimer = 0
 	else
 		autoHeal.MobAuraScanTimer = 0
 		if #autoHeal.MobAuraTargets > 0 then
@@ -3658,17 +3672,44 @@ function updateAuras(dt)
 		table.clear(autoHeal.MobAuraIds)
 		table.clear(autoHeal.MobAuraParts)
 	end
-	if state.MineAura or state.MobAura then
+	if state.WeaponAura or state.MineAura or state.MobAura then
 		autoHeal.FarmAuraTimer += dt
 		if autoHeal.FarmAuraTimer >= 0.1 then
 			autoHeal.FarmAuraTimer = 0
-			if state.MineAura then
-				sendAuraAttack(auraTargets(root.Position, "Mine", 3), root)
+			local chosenTargets
+			local chosenType
+			local chosenDistance
+			if state.WeaponAura then
+				local targets = weaponAuraTargets(root.Position)
+				if #targets > 0 then
+					chosenTargets = targets
+					chosenType = "Weapon"
+					chosenDistance = targets[1].DistanceSq
+				end
 			end
 			if state.MobAura then
-				sendAuraAttack(mobAuraTargets(), root)
+				refreshMobAuraTargets(root.Position)
+				local targets = mobAuraTargets()
+				if #targets > 0 and (not chosenDistance or targets[1].DistanceSq < chosenDistance) then
+					chosenTargets = targets
+					chosenType = "Mob"
+					chosenDistance = targets[1].DistanceSq
+				end
+			end
+			if state.MineAura then
+				local targets = auraTargets(root.Position, "Mine", 3)
+				if #targets > 0 and (not chosenDistance or targets[1].DistanceSq < chosenDistance) then
+					chosenTargets = targets
+					chosenType = "Mine"
+				end
+			end
+			if chosenTargets then
+				sendAuraAttack(chosenTargets, root, false, chosenType == "Mob")
 			end
 		end
+	else
+		autoHeal.FarmAuraTimer = 0
+		autoHeal.FarmAuraTurn = "Mob"
 	end
 end
 
@@ -4975,7 +5016,7 @@ function syncFreecamEspLabels()
 	for instance, obj in pairs(esp.World) do
 		local adornee = instance.Parent and getAdornee(instance)
 		if obj.Billboard then
-			obj.Billboard.Enabled = not state.Freecam and state.WorldNames
+			obj.Billboard.Enabled = false
 		end
 		drawScreenEspLabel(obj, adornee, state.WorldNames, state.WorldTextSize)
 	end
