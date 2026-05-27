@@ -36,34 +36,15 @@ function isVoidWorld()
 end
 
 function lockedFeatureMessage()
-	notify("Feature Locked", "Locked in Void to prevent kick.")
+	notify("Feature Locked", "ONLY TUBBISON GETS TO USE THIS ME!!!!!")
 end
 
 function isLockedLabel(label)
-	if not isVoidWorld() then
-		return false
-	end
-	return label == "Auto Heal"
-		or label == "Heal Fallback"
-		or label == "Auto Hunger"
-		or label == "Auto Pickup"
-		or label == "Auto Pickup Chests"
-		or label == "Pickup Essence"
-		or label == "Auto Drop"
-		or label == "Auto Harvest"
-		or label == "Auto Plant"
-		or label == "Auto Farm"
-		or label == "Plant Box Visualizer"
-		or string.find(label, "AutoPlaceBox", 1, true) ~= nil
-		or label == "Abort AutoPlaceBox"
-		or label == "Chest Place"
-		or label == "Weapon Aura"
-		or label == "Mine Aura"
-		or label == "Mob Aura"
+	return true
 end
 
 function isLockedKeybind(stateKey)
-	return isVoidWorld() and stateKey == "AutoPickupKey"
+	return true
 end
 
 local UI = {
