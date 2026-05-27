@@ -40,18 +40,11 @@ function lockedFeatureMessage()
 end
 
 function isLockedLabel(label)
-	if label == "Auto Load Config"
-		or label == "Load Config"
-		or label == "Save Config"
-		or label == "Overwrite Config"
-		or label == "Delete Config" then
-		return false
-	end
 	return true
 end
 
 function isLockedKeybind(stateKey)
-	return false
+	return true
 end
 
 local UI = {
@@ -197,6 +190,15 @@ if isVoidWorld() then
 	state.MineAura = false
 	state.MobAura = false
 end
+
+for key, value in pairs(state) do
+	if typeof(value) == "boolean" and key ~= "PanelVisible" then
+		state[key] = false
+	end
+end
+state.ToggleKey = Enum.KeyCode.Return
+state.ConfigName = "Default"
+state.SelectedConfig = "Default"
 
 local selections = {
 	Ore = {
@@ -1466,6 +1468,10 @@ function createSlider(parent, label, min, max, getValue, setValue)
 	local sliding = false
 
 	local function setFromX(x)
+		if isLockedLabel(label) then
+			lockedFeatureMessage()
+			return
+		end
 		local relative = math.clamp((x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
 		local value = math.floor(min + (max - min) * relative + 0.5)
 		setValue(value)
@@ -1481,10 +1487,18 @@ function createSlider(parent, label, min, max, getValue, setValue)
 	end
 
 	connect(knob.MouseButton1Down, function()
+		if isLockedLabel(label) then
+			lockedFeatureMessage()
+			return
+		end
 		sliding = true
 	end)
 	connect(bar.InputBegan, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			if isLockedLabel(label) then
+				lockedFeatureMessage()
+				return
+			end
 			sliding = true
 			setFromX(input.Position.X)
 			redraw()
@@ -1672,6 +1686,7 @@ function createActionButton(parent, label, callback)
 end
 
 function createTextInput(parent, label, getValue, setValue)
+	local locked = isLockedLabel(label)
 	local row = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 34),
 		BackgroundTransparency = 1,
@@ -1692,6 +1707,7 @@ function createTextInput(parent, label, getValue, setValue)
 		BackgroundColor3 = Color3.fromRGB(20, 20, 23),
 		BorderSizePixel = 0,
 		ClearTextOnFocus = false,
+		Editable = not locked,
 		Font = Enum.Font.Gotham,
 		PlaceholderText = "Config name",
 		PlaceholderColor3 = Color3.fromRGB(145, 140, 155),
@@ -1706,6 +1722,11 @@ function createTextInput(parent, label, getValue, setValue)
 		PaddingRight = UDim.new(0, 8),
 	}, input)
 	connect(input.FocusLost, function()
+		if locked then
+			lockedFeatureMessage()
+			input.Text = tostring(getValue() or "")
+			return
+		end
 		setValue(input.Text)
 		input.Text = tostring(getValue() or "")
 	end)
@@ -4212,6 +4233,10 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 	connect(closeButton.MouseButton1Click, closeDropdown)
 
 	connect(headerButton.MouseButton1Click, function()
+		if isLockedLabel(label) then
+			lockedFeatureMessage()
+			return
+		end
 		local shouldOpen = not expanded
 		closeDropdowns()
 		expanded = shouldOpen
@@ -4350,6 +4375,10 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 	table.insert(dropdownClosers, closeDropdown)
 
 	connect(headerButton.MouseButton1Click, function()
+		if isLockedLabel(label) then
+			lockedFeatureMessage()
+			return
+		end
 		local shouldOpen = not expanded
 		closeDropdowns()
 		expanded = shouldOpen
@@ -6614,6 +6643,8 @@ function applyConfigData(data)
 end
 
 function saveConfigNamed(name, overwrite)
+	lockedFeatureMessage()
+	do return false end
 	if not canUseConfigFiles() then
 		notify("Config", "Executor file API not found.")
 		return false
@@ -6653,6 +6684,8 @@ function rewriteConfig()
 end
 
 function loadConfig(silent, name)
+	lockedFeatureMessage()
+	do return false end
 	if not canUseConfigFiles() then
 		if not silent then notify("Config", "Executor file API not found.") end
 		return false
@@ -7193,10 +7226,10 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 		if isTypingInTextBox() then
 			return
 		end
-		state[awaitingKeybindFor] = input.KeyCode
 		local changedKey = awaitingKeybindFor
 		awaitingKeybindFor = nil
 		updateKeybindText(changedKey)
+		lockedFeatureMessage()
 		return
 	end
 
@@ -7222,15 +7255,12 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if input.KeyCode == state.FreecamToggleKey then
-		setFreecam(not state.Freecam)
-		if freecamToggleRedraw then
-			freecamToggleRedraw()
-		end
+		lockedFeatureMessage()
 		return
 	end
 
 	if input.KeyCode == state.AutoRunKey then
-		state.AutoRun = not state.AutoRun
+		lockedFeatureMessage()
 		return
 	end
 
