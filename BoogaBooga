@@ -249,6 +249,8 @@ local selections = {
 local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Strawberry", "Sunfruit", "Watermelon", "Jelly", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
+local autoPickupRangeSq = 400
+local autoPickupChestRangeSq = 400
 local oreFallbackColors = {
 	Iron = Color3.fromRGB(185, 135, 85),
 	Stone = Color3.fromRGB(125, 125, 125),
@@ -423,6 +425,11 @@ local autoHeal = {
 	PickupSound = nil,
 	PickupByteNet = nil,
 	PickupTimer = 0,
+	PickupSent = {},
+	PickupQueue = {},
+	PickupQueueIds = {},
+	PickupBurstWindow = 0,
+	PickupBurstCount = 0,
 	PlayerEspTimer = 0,
 	OrbitTimer = 0,
 	OrbitLastTime = 0,
@@ -464,8 +471,11 @@ local autoHeal = {
 	DropEstimateTickTime = 0,
 	DropEstimateNoChangeSince = 0,
 	DropEstimateLabel = "",
+	DropEstimateSamples = {},
 	DropPacket = nil,
 	DropOrder = {},
+	DropHadTargets = false,
+	DropEmptySince = 0,
 	GodCounters = {},
 	GodRespawns = {},
 	GodRespawnTimer = 0,
@@ -2540,20 +2550,27 @@ function getPickupByteNet()
 end
 
 function sendPickupPacket(entityID)
+	local now = os.clock()
+	local lastSent = autoHeal.PickupSent[entityID]
+	if lastSent and now - lastSent < 0.02 then
+		return false
+	end
+	autoHeal.PickupSent[entityID] = now
 	local remote = getPickupByteNet()
 	if remote then
 		local ok = pcall(function()
 			remote:FireServer(buffer.fromstring(pickupEncode(entityID)))
 		end)
 		if ok then
-			return
+			return true
 		end
 	end
 	if loadPickupModules() and autoHeal.PickupRemote then
-		pcall(function()
+		return pcall(function()
 			autoHeal.PickupRemote.send(entityID)
 		end)
 	end
+	return false
 end
 
 function pickupEntityID(item, part)
@@ -2578,50 +2595,112 @@ function pickupEntityID(item, part)
 	return nil
 end
 
-function tryPickupItem(item, essenceOnly, root)
+function pickupCandidate(item, essenceOnly, root)
+	local position, distanceSq = closestPartPosition(item, root.Position)
 	local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
-	local entityID = part and pickupEntityID(item, part)
-	if not part or not entityID or (essenceOnly and not item.Name:find("Essence") and not part.Name:find("Essence")) then
-		return
+	local entityID = pickupEntityID(item, part)
+	local itemName = item.Name
+	local partName = part and part.Name or ""
+	if not position or not entityID or (essenceOnly and not itemName:find("Essence") and not partName:find("Essence")) then
+		return nil
 	end
-	local offset = root.Position - part.Position
-	if offset:Dot(offset) <= 2500 then
-		sendPickupPacket(entityID)
+	if distanceSq <= autoPickupRangeSq then
+		return { EntityID = entityID, DistanceSq = distanceSq }
+	end
+	return nil
+end
+
+function tryPickupItem(item, essenceOnly, root)
+	local candidate = pickupCandidate(item, essenceOnly, root)
+	if candidate then
+		sendPickupPacket(candidate.EntityID)
+	end
+end
+
+function queuePickupItem(item, essenceOnly, root)
+	local candidate = pickupCandidate(item, essenceOnly, root)
+	if candidate and not autoHeal.PickupQueueIds[candidate.EntityID] then
+		autoHeal.PickupQueueIds[candidate.EntityID] = true
+		table.insert(autoHeal.PickupQueue, candidate)
+	end
+end
+
+function sendQueuedPickups(limit)
+	table.sort(autoHeal.PickupQueue, function(a, b)
+		return a.DistanceSq < b.DistanceSq
+	end)
+	local sent = 0
+	while (not limit or sent < limit) and #autoHeal.PickupQueue > 0 do
+		local candidate = table.remove(autoHeal.PickupQueue, 1)
+		autoHeal.PickupQueueIds[candidate.EntityID] = nil
+		if sendPickupPacket(candidate.EntityID) then
+			sent += 1
+		end
 	end
 end
 
 function pickupClosestItem(essenceOnly)
 	local currentCharacter, hum, root = getCharacterParts()
-	local itemsFolder = workspace:FindFirstChild("Items")
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
 	end
-	if itemsFolder then
-		for _, item in ipairs(itemsFolder:GetChildren()) do
-			tryPickupItem(item, essenceOnly, root)
+	table.clear(autoHeal.PickupQueue)
+	table.clear(autoHeal.PickupQueueIds)
+	local scanned = 0
+	for _, folderName in ipairs({ "Items", "DroppedItems", "Drops" }) do
+		local itemsFolder = workspace:FindFirstChild(folderName)
+		if itemsFolder then
+			for _, item in ipairs(itemsFolder:GetChildren()) do
+				scanned += 1
+				if scanned > 500 then
+					break
+				end
+				queuePickupItem(item, essenceOnly, root)
+			end
+		end
+		if scanned > 500 then
+			break
 		end
 	end
 	if not essenceOnly and state.AutoPickupChests then
 		local deployables = workspace:FindFirstChild("Deployables")
+		local chestScanned = 0
 		if deployables then
 			for _, chest in ipairs(deployables:GetChildren()) do
 				local contents = chest:FindFirstChild("Contents")
 				local chestPart = chest.PrimaryPart or chest:FindFirstChildWhichIsA("BasePart")
 				if chest:IsA("Model") and contents and chestPart then
 					local chestOffset = root.Position - chestPart.Position
-					if chestOffset:Dot(chestOffset) <= 2500 then
+					if chestOffset:Dot(chestOffset) <= autoPickupChestRangeSq then
 						for _, item in ipairs(contents:GetChildren()) do
-							tryPickupItem(item, false, root)
+							chestScanned += 1
+							if chestScanned > 200 then
+								break
+							end
+							queuePickupItem(item, false, root)
 						end
 					end
+				end
+				if chestScanned > 200 then
+					break
 				end
 			end
 		end
 	end
+	sendQueuedPickups(state.AutoPickup and #autoHeal.PickupQueue or 10)
 end
 
 function instantPickupChild(item)
 	if isVoidWorld() or (not state.AutoPickup and not state.PickupEssence) then
+		return
+	end
+	local now = os.clock()
+	if now - autoHeal.PickupBurstWindow > 0.5 then
+		autoHeal.PickupBurstWindow = now
+		autoHeal.PickupBurstCount = 0
+	end
+	autoHeal.PickupBurstCount += 1
+	if autoHeal.PickupBurstCount > 240 then
 		return
 	end
 	local _, hum, root = getCharacterParts()
@@ -2629,12 +2708,14 @@ function instantPickupChild(item)
 		return
 	end
 	local essenceOnly = state.PickupEssence and not state.AutoPickup
-	tryPickupItem(item, essenceOnly, root)
-	task.delay(0.03, function()
-		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) then
+	queuePickupItem(item, essenceOnly, root)
+	sendQueuedPickups(state.AutoPickup and #autoHeal.PickupQueue or 4)
+	task.delay(0.12, function()
+		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) and #autoHeal.PickupQueue < 180 then
 			local _, delayedHum, delayedRoot = getCharacterParts()
 			if delayedHum and delayedHum.Health > 0 and delayedRoot then
-				tryPickupItem(item, essenceOnly, delayedRoot)
+				queuePickupItem(item, essenceOnly, delayedRoot)
+				sendQueuedPickups(state.AutoPickup and #autoHeal.PickupQueue or 4)
 			end
 		end
 	end)
@@ -2642,10 +2723,12 @@ end
 
 function updateAutoPickup(dt)
 	if isVoidWorld() or (not state.AutoPickup and not state.PickupEssence) then
+		table.clear(autoHeal.PickupQueue)
+		table.clear(autoHeal.PickupQueueIds)
 		return
 	end
 	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < (state.AutoPickup and 0.08 or 0.2) then
+	if autoHeal.PickupTimer < (state.AutoPickup and 0.02 or 0.14) then
 		return
 	end
 	autoHeal.PickupTimer = 0
@@ -2863,6 +2946,17 @@ function inventoryQuantity(itemName)
 	return total
 end
 
+function dropItemQuantity(item)
+	if not item then
+		return 0
+	end
+	local quantity = tonumber(item.quantity) or tonumber(item.amount) or tonumber(item.count)
+	if quantity then
+		return quantity
+	end
+	return item.name and 1 or 0
+end
+
 function formatShortTime(seconds)
 	seconds = math.max(0, math.floor((seconds or 0) + 0.5))
 	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
@@ -2880,6 +2974,9 @@ function resetAutoDropEstimate(keepLabel)
 	autoHeal.DropEstimateDisplayTime = 0
 	autoHeal.DropEstimateTickTime = 0
 	autoHeal.DropEstimateNoChangeSince = 0
+	autoHeal.DropHadTargets = false
+	autoHeal.DropEmptySince = 0
+	table.clear(autoHeal.DropEstimateSamples)
 	if not keepLabel then
 		autoHeal.DropEstimateLabel = ""
 	end
@@ -2898,15 +2995,37 @@ function updateAutoDropEstimate(remaining)
 	local now = os.clock()
 	local tickElapsed = autoHeal.DropEstimateTickTime > 0 and math.max(now - autoHeal.DropEstimateTickTime, 0) or 0
 	autoHeal.DropEstimateTickTime = now
+	table.insert(autoHeal.DropEstimateSamples, { Time = now, Remaining = remaining })
+	while #autoHeal.DropEstimateSamples > 1 and now - autoHeal.DropEstimateSamples[1].Time > 12 do
+		table.remove(autoHeal.DropEstimateSamples, 1)
+	end
 	if autoHeal.DropEstimateLastRemaining and remaining < autoHeal.DropEstimateLastRemaining then
 		local elapsed = math.max(now - autoHeal.DropEstimateLastTime, 0.001)
 		local rate = (autoHeal.DropEstimateLastRemaining - remaining) / elapsed
-		autoHeal.DropEstimateRate = autoHeal.DropEstimateRate and (autoHeal.DropEstimateRate * 0.85 + rate * 0.15) or rate
+		local oldest
+		for _, sample in ipairs(autoHeal.DropEstimateSamples) do
+			if sample.Remaining > remaining then
+				oldest = sample
+				break
+			end
+		end
+		if oldest then
+			local window = math.max(now - oldest.Time, 0.001)
+			local windowRate = (oldest.Remaining - remaining) / window
+			rate = math.min(rate, windowRate * 1.2)
+			autoHeal.DropEstimateRate = autoHeal.DropEstimateRate and (autoHeal.DropEstimateRate * 0.65 + windowRate * 0.35) or windowRate
+		else
+			autoHeal.DropEstimateRate = autoHeal.DropEstimateRate and (autoHeal.DropEstimateRate * 0.8 + rate * 0.2) or rate
+		end
 		autoHeal.DropEstimateLastTime = now
 		autoHeal.DropEstimateNoChangeSince = now
 	elseif not autoHeal.DropEstimateLastRemaining or remaining > autoHeal.DropEstimateLastRemaining then
 		autoHeal.DropEstimateLastTime = now
 		autoHeal.DropEstimateNoChangeSince = now
+		autoHeal.DropEstimateRate = nil
+		autoHeal.DropEstimateSeconds = nil
+		table.clear(autoHeal.DropEstimateSamples)
+		table.insert(autoHeal.DropEstimateSamples, { Time = now, Remaining = remaining })
 	elseif autoHeal.DropEstimateNoChangeSince == 0 then
 		autoHeal.DropEstimateNoChangeSince = now
 	end
@@ -2935,7 +3054,12 @@ function updateAutoDropEstimate(remaining)
 	local rawSeconds = remaining / math.max(rate, 0.001)
 	local seconds = rawSeconds
 	if autoHeal.DropEstimateSeconds then
-		seconds = math.min(rawSeconds, math.max(1, autoHeal.DropEstimateSeconds - tickElapsed))
+		local tickingSeconds = math.max(1, autoHeal.DropEstimateSeconds - tickElapsed)
+		if rawSeconds > tickingSeconds + 10 and now - autoHeal.DropEstimateDisplayTime >= 2 then
+			seconds = tickingSeconds + math.min(rawSeconds - tickingSeconds, 8)
+		else
+			seconds = math.min(rawSeconds, tickingSeconds)
+		end
 	end
 	autoHeal.DropEstimateSeconds = seconds
 	local label = formatShortTime(seconds)
@@ -2956,6 +3080,8 @@ function updateAutoDrop(dt)
 				autoDropToggleRedraw()
 			end
 		end
+		autoHeal.DropHadTargets = false
+		autoHeal.DropEmptySince = 0
 		return
 	end
 	autoHeal.DropTimer += dt
@@ -2978,9 +3104,10 @@ function updateAutoDrop(dt)
 	local remaining = 0
 	local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
 	for slot, item in pairs(inventory or {}) do
-		if item and item.name and item.name ~= "Rock" and selections.AutoDrop[item.name] and (tonumber(item.quantity) or 0) > 0 then
+		local quantity = dropItemQuantity(item)
+		if item and item.name and item.name ~= "Rock" and selections.AutoDrop[item.name] and quantity > 0 then
 			slots[item.name] = slot
-			remaining += tonumber(item.quantity) or 0
+			remaining += quantity
 		end
 	end
 	updateAutoDropEstimate(remaining)
@@ -3007,26 +3134,47 @@ function updateAutoDrop(dt)
 		if state.AutoDropStopFarming then
 			return
 		end
-		updateAutoDropEstimate(0)
-		notify("Auto Drop", "Finished dropping selected items.")
-		state.AutoDrop = false
-		if autoDropToggleRedraw then
-			autoDropToggleRedraw()
+		local now = os.clock()
+		if autoHeal.DropHadTargets then
+			autoHeal.DropEmptySince = autoHeal.DropEmptySince > 0 and autoHeal.DropEmptySince or now
+			if now - autoHeal.DropEmptySince >= 1.5 then
+				updateAutoDropEstimate(0)
+				notify("Auto Drop", "Finished dropping selected items.")
+				state.AutoDrop = false
+				autoHeal.DropHadTargets = false
+				autoHeal.DropEmptySince = 0
+				if autoDropToggleRedraw then
+					autoDropToggleRedraw()
+				end
+			end
+		else
+			autoHeal.DropEstimateLabel = "..."
+			if autoDropToggleRedraw then
+				autoDropToggleRedraw()
+			end
 		end
 		return
 	end
+	autoHeal.DropHadTargets = true
+	autoHeal.DropEmptySince = 0
 	if autoHeal.DropIndex > #names then
 		autoHeal.DropIndex = 1
 	end
-	for _, itemName in ipairs(names) do
+	local sent = 0
+	while sent < math.min(4, #names) do
+		local itemName = names[autoHeal.DropIndex]
 		local slot = slots[itemName]
 		if slot then
 			pcall(function()
 				packet.send(slot)
 			end)
 		end
+		autoHeal.DropIndex += 1
+		if autoHeal.DropIndex > #names then
+			autoHeal.DropIndex = 1
+		end
+		sent += 1
 	end
-	autoHeal.DropIndex = 1
 end
 
 function selectedPlantItemID()
@@ -6420,7 +6568,7 @@ function collectInventoryNames()
 	local names = {}
 	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
 		for _, item in pairs(autoHeal.GameUtil.Data.inventory) do
-			if item and item.name and item.quantity and item.quantity > 0 and item.name ~= "Pleb Chest" and item.name ~= "Rock" then
+			if item and item.name and dropItemQuantity(item) > 0 and item.name ~= "Pleb Chest" and item.name ~= "Rock" then
 				names[item.name] = true
 				if selections.AutoDrop[item.name] == nil then
 					selections.AutoDrop[item.name] = isDefaultAutoDropItem(item.name)
@@ -7381,8 +7529,14 @@ local itemsFolder = workspace:FindFirstChild("Items")
 if itemsFolder then
 	connect(itemsFolder.ChildAdded, instantPickupChild)
 end
+for _, folderName in ipairs({ "DroppedItems", "Drops" }) do
+	local dropFolder = workspace:FindFirstChild(folderName)
+	if dropFolder then
+		connect(dropFolder.ChildAdded, instantPickupChild)
+	end
+end
 connect(workspace.ChildAdded, function(child)
-	if child.Name == "Items" then
+	if child.Name == "Items" or child.Name == "DroppedItems" or child.Name == "Drops" then
 		connect(child.ChildAdded, instantPickupChild)
 	end
 end)
