@@ -40,11 +40,18 @@ function lockedFeatureMessage()
 end
 
 function isLockedLabel(label)
+	if label == "Auto Load Config"
+		or label == "Load Config"
+		or label == "Save Config"
+		or label == "Overwrite Config"
+		or label == "Delete Config" then
+		return false
+	end
 	return true
 end
 
 function isLockedKeybind(stateKey)
-	return true
+	return false
 end
 
 local UI = {
