@@ -35,35 +35,20 @@ function isVoidWorld()
 	return game.PlaceId == PLACE.VoidWorld or game.GameId == PLACE.VoidWorld
 end
 
+function voidSlow(normalSeconds, voidSeconds)
+	return isVoidWorld() and voidSeconds or normalSeconds
+end
+
 function lockedFeatureMessage()
-	notify("Feature Locked", "Locked in Void to prevent kick.")
+	notify("Void Slow Mode", "Feature works slower in Void.")
 end
 
 function isLockedLabel(label)
-	if not isVoidWorld() then
-		return false
-	end
-	return label == "Auto Heal"
-		or label == "Heal Fallback"
-		or label == "Auto Hunger"
-		or label == "Auto Pickup"
-		or label == "Auto Pickup Chests"
-		or label == "Pickup Essence"
-		or label == "Auto Drop"
-		or label == "Auto Harvest"
-		or label == "Auto Plant"
-		or label == "Auto Farm"
-		or label == "Plant Box Visualizer"
-		or string.find(label, "AutoPlaceBox", 1, true) ~= nil
-		or label == "Abort AutoPlaceBox"
-		or label == "Chest Place"
-		or label == "Weapon Aura"
-		or label == "Mine Aura"
-		or label == "Mob Aura"
+	return isVoidWorld() and label == "Auto Heal"
 end
 
 function isLockedKeybind(stateKey)
-	return isVoidWorld() and stateKey == "AutoPickupKey"
+	return false
 end
 
 local UI = {
@@ -249,8 +234,8 @@ local selections = {
 local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Strawberry", "Sunfruit", "Watermelon", "Jelly", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
-local autoPickupRangeSq = 400
-local autoPickupChestRangeSq = 400
+local autoPickupRangeSq = 900
+local autoPickupChestRangeSq = 900
 local oreFallbackColors = {
 	Iron = Color3.fromRGB(185, 135, 85),
 	Stone = Color3.fromRGB(125, 125, 125),
@@ -430,6 +415,7 @@ local autoHeal = {
 	PickupQueueIds = {},
 	PickupBurstWindow = 0,
 	PickupBurstCount = 0,
+	PickupTracked = {},
 	PlayerEspTimer = 0,
 	OrbitTimer = 0,
 	OrbitLastTime = 0,
@@ -472,6 +458,8 @@ local autoHeal = {
 	DropEstimateNoChangeSince = 0,
 	DropEstimateLabel = "",
 	DropEstimateSamples = {},
+	DropEstimateStartRemaining = nil,
+	DropEstimateStartTime = 0,
 	DropPacket = nil,
 	DropOrder = {},
 	DropHadTargets = false,
@@ -490,6 +478,7 @@ local autoHeal = {
 	Notifications = {},
 	LastNoDropNotify = 0,
 	DanceTrack = nil,
+	FlyTrack = nil,
 	ThemeRgbTimer = 0,
 }
 local recipeView = {}
@@ -1040,7 +1029,7 @@ function showCustomNotification(titleText, bodyText, duration)
 end
 
 function showLoadNotification()
-	showCustomNotification("Chubbison Me Loaded", isVoidWorld() and "Gui Toggle: Return\nSome Features are Locked to Prevent Kick" or "Gui Toggle: Return", 4)
+	showCustomNotification("Chubbison Me Loaded", isVoidWorld() and "Gui Toggle: Return\nVoid Slow Mode Active" or "Gui Toggle: Return", 4)
 end
 task.delay(0.8, showLoadNotification)
 task.defer(function()
@@ -2225,7 +2214,7 @@ function updateAutoHeal(dt)
 		return
 	end
 	autoHeal.Timer += dt
-	if autoHeal.Timer < 0.001 or os.clock() - autoHeal.LastUse < 0.002 then
+	if autoHeal.Timer < voidSlow(0.001, 4) or os.clock() - autoHeal.LastUse < voidSlow(0.002, 4) then
 		return
 	end
 	autoHeal.Timer = 0
@@ -2403,11 +2392,7 @@ function updateChestPreview()
 end
 
 function placeChest()
-	if isVoidWorld() then
-		lockedFeatureMessage()
-		return
-	end
-	if os.clock() - autoHeal.ChestLastPlace < 0.2 or not loadAutoHealModules() then
+	if os.clock() - autoHeal.ChestLastPlace < voidSlow(0.2, 5) or not loadAutoHealModules() then
 		return
 	end
 	local cf = getChestPlaceCFrame()
@@ -2424,7 +2409,7 @@ function placeChest()
 end
 
 function updateAutoHunger(dt)
-	if isVoidWorld() or not state.AutoHunger then
+	if not state.AutoHunger then
 		autoHeal.HungerPendingFood = nil
 		autoHeal.NoHungerAttempts = 0
 		return
@@ -2450,7 +2435,7 @@ function updateAutoHunger(dt)
 		return
 	end
 	autoHeal.HungerTimer += dt
-	if autoHeal.HungerTimer < 2 then
+	if autoHeal.HungerTimer < voidSlow(2, 8) then
 		return
 	end
 	autoHeal.HungerTimer = 0
@@ -2625,6 +2610,67 @@ function queuePickupItem(item, essenceOnly, root)
 	end
 end
 
+function pickupTopObject(item)
+	if not item or not (item:IsA("Model") or item:IsA("BasePart") or item:IsA("Folder")) then
+		return nil
+	end
+	local current = item
+	while current.Parent and current.Parent.Name ~= "Items" and current.Parent.Name ~= "DroppedItems" and current.Parent.Name ~= "Drops" and current.Parent ~= workspace do
+		current = current.Parent
+	end
+	return current
+end
+
+function trackPickupObject(item)
+	local topObject = pickupTopObject(item)
+	if topObject then
+		autoHeal.PickupTracked[topObject] = true
+	end
+end
+
+function trackPickupContainer(container)
+	if not container then
+		return
+	end
+	for _, item in ipairs(container:GetChildren()) do
+		trackPickupObject(item)
+	end
+	for _, item in ipairs(container:GetDescendants()) do
+		trackPickupObject(item)
+	end
+end
+
+function queueTrackedPickups(essenceOnly, root)
+	for item in pairs(autoHeal.PickupTracked) do
+		if item and item.Parent then
+			queuePickupItem(item, essenceOnly, root)
+		else
+			autoHeal.PickupTracked[item] = nil
+		end
+	end
+end
+
+function scanPickupContainer(container, essenceOnly, root, scanLimit)
+	local scanned = 0
+	for _, item in ipairs(container:GetChildren()) do
+		scanned += 1
+		if scanLimit and scanned > scanLimit then
+			return scanned
+		end
+		queuePickupItem(item, essenceOnly, root)
+	end
+	for _, item in ipairs(container:GetDescendants()) do
+		if item:IsA("Model") or item:IsA("BasePart") or item:IsA("Folder") then
+			scanned += 1
+			if scanLimit and scanned > scanLimit then
+				return scanned
+			end
+			queuePickupItem(item, essenceOnly, root)
+		end
+	end
+	return scanned
+end
+
 function sendQueuedPickups(limit)
 	table.sort(autoHeal.PickupQueue, function(a, b)
 		return a.DistanceSq < b.DistanceSq
@@ -2647,18 +2693,20 @@ function pickupClosestItem(essenceOnly)
 	table.clear(autoHeal.PickupQueue)
 	table.clear(autoHeal.PickupQueueIds)
 	local scanned = 0
-	for _, folderName in ipairs({ "Items", "DroppedItems", "Drops" }) do
-		local itemsFolder = workspace:FindFirstChild(folderName)
-		if itemsFolder then
-			for _, item in ipairs(itemsFolder:GetChildren()) do
-				scanned += 1
-				if scanned > 500 then
-					break
-				end
-				queuePickupItem(item, essenceOnly, root)
-			end
+	local itemsFolder = workspace:FindFirstChild("Items")
+	if itemsFolder then
+		if not autoHeal.PickupTrackedInitialized then
+			trackPickupContainer(itemsFolder)
+			autoHeal.PickupTrackedInitialized = true
 		end
-		if scanned > 500 then
+		queueTrackedPickups(essenceOnly, root)
+	end
+	for _, folderName in ipairs({ "DroppedItems", "Drops" }) do
+		local dropFolder = workspace:FindFirstChild(folderName)
+		if dropFolder then
+			scanned += scanPickupContainer(dropFolder, essenceOnly, root, math.max(1, 180 - scanned))
+		end
+		if scanned > 180 then
 			break
 		end
 	end
@@ -2687,11 +2735,15 @@ function pickupClosestItem(essenceOnly)
 			end
 		end
 	end
-	sendQueuedPickups(state.AutoPickup and #autoHeal.PickupQueue or 10)
+	sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 5) or #autoHeal.PickupQueue) or 10)
 end
 
 function instantPickupChild(item)
-	if isVoidWorld() or (not state.AutoPickup and not state.PickupEssence) then
+	item = pickupTopObject(item)
+	if not item then
+		return
+	end
+	if not state.AutoPickup and not state.PickupEssence then
 		return
 	end
 	local now = os.clock()
@@ -2709,26 +2761,35 @@ function instantPickupChild(item)
 	end
 	local essenceOnly = state.PickupEssence and not state.AutoPickup
 	queuePickupItem(item, essenceOnly, root)
-	sendQueuedPickups(state.AutoPickup and #autoHeal.PickupQueue or 4)
+	sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
 	task.delay(0.12, function()
 		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) and #autoHeal.PickupQueue < 180 then
 			local _, delayedHum, delayedRoot = getCharacterParts()
 			if delayedHum and delayedHum.Health > 0 and delayedRoot then
 				queuePickupItem(item, essenceOnly, delayedRoot)
-				sendQueuedPickups(state.AutoPickup and #autoHeal.PickupQueue or 4)
+				sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
+			end
+		end
+	end)
+	task.delay(0.45, function()
+		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) and #autoHeal.PickupQueue < 180 then
+			local _, delayedHum, delayedRoot = getCharacterParts()
+			if delayedHum and delayedHum.Health > 0 and delayedRoot then
+				queuePickupItem(item, essenceOnly, delayedRoot)
+				sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
 			end
 		end
 	end)
 end
 
 function updateAutoPickup(dt)
-	if isVoidWorld() or (not state.AutoPickup and not state.PickupEssence) then
+	if not state.AutoPickup and not state.PickupEssence then
 		table.clear(autoHeal.PickupQueue)
 		table.clear(autoHeal.PickupQueueIds)
 		return
 	end
 	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < (state.AutoPickup and 0.02 or 0.14) then
+	if autoHeal.PickupTimer < (state.AutoPickup and voidSlow(0.02, 0.65) or voidSlow(0.14, 1)) then
 		return
 	end
 	autoHeal.PickupTimer = 0
@@ -2976,6 +3037,8 @@ function resetAutoDropEstimate(keepLabel)
 	autoHeal.DropEstimateNoChangeSince = 0
 	autoHeal.DropHadTargets = false
 	autoHeal.DropEmptySince = 0
+	autoHeal.DropEstimateStartRemaining = nil
+	autoHeal.DropEstimateStartTime = 0
 	table.clear(autoHeal.DropEstimateSamples)
 	if not keepLabel then
 		autoHeal.DropEstimateLabel = ""
@@ -2993,46 +3056,31 @@ function updateAutoDropEstimate(remaining)
 		return
 	end
 	local now = os.clock()
-	local tickElapsed = autoHeal.DropEstimateTickTime > 0 and math.max(now - autoHeal.DropEstimateTickTime, 0) or 0
 	autoHeal.DropEstimateTickTime = now
-	table.insert(autoHeal.DropEstimateSamples, { Time = now, Remaining = remaining })
-	while #autoHeal.DropEstimateSamples > 1 and now - autoHeal.DropEstimateSamples[1].Time > 12 do
-		table.remove(autoHeal.DropEstimateSamples, 1)
-	end
-	if autoHeal.DropEstimateLastRemaining and remaining < autoHeal.DropEstimateLastRemaining then
-		local elapsed = math.max(now - autoHeal.DropEstimateLastTime, 0.001)
-		local rate = (autoHeal.DropEstimateLastRemaining - remaining) / elapsed
-		local oldest
-		for _, sample in ipairs(autoHeal.DropEstimateSamples) do
-			if sample.Remaining > remaining then
-				oldest = sample
-				break
-			end
-		end
-		if oldest then
-			local window = math.max(now - oldest.Time, 0.001)
-			local windowRate = (oldest.Remaining - remaining) / window
-			rate = math.min(rate, windowRate * 1.2)
-			autoHeal.DropEstimateRate = autoHeal.DropEstimateRate and (autoHeal.DropEstimateRate * 0.65 + windowRate * 0.35) or windowRate
-		else
-			autoHeal.DropEstimateRate = autoHeal.DropEstimateRate and (autoHeal.DropEstimateRate * 0.8 + rate * 0.2) or rate
-		end
-		autoHeal.DropEstimateLastTime = now
-		autoHeal.DropEstimateNoChangeSince = now
-	elseif not autoHeal.DropEstimateLastRemaining or remaining > autoHeal.DropEstimateLastRemaining then
-		autoHeal.DropEstimateLastTime = now
-		autoHeal.DropEstimateNoChangeSince = now
+	if not autoHeal.DropEstimateStartRemaining or remaining > autoHeal.DropEstimateStartRemaining then
+		autoHeal.DropEstimateStartRemaining = remaining
+		autoHeal.DropEstimateStartTime = now
+		autoHeal.DropEstimateLastRemaining = remaining
 		autoHeal.DropEstimateRate = nil
 		autoHeal.DropEstimateSeconds = nil
-		table.clear(autoHeal.DropEstimateSamples)
-		table.insert(autoHeal.DropEstimateSamples, { Time = now, Remaining = remaining })
+		if autoHeal.DropEstimateLabel ~= "..." then
+			autoHeal.DropEstimateLabel = "..."
+			if autoDropToggleRedraw then
+				autoDropToggleRedraw()
+			end
+		end
+		return
+	end
+	if autoHeal.DropEstimateLastRemaining and remaining < autoHeal.DropEstimateLastRemaining then
+		autoHeal.DropEstimateNoChangeSince = now
 	elseif autoHeal.DropEstimateNoChangeSince == 0 then
 		autoHeal.DropEstimateNoChangeSince = now
 	end
 	autoHeal.DropEstimateLastRemaining = remaining
-	if autoHeal.DropEstimateRate and now - autoHeal.DropEstimateNoChangeSince > 3 then
-		autoHeal.DropEstimateRate = nil
-		autoHeal.DropEstimateSeconds = nil
+
+	local elapsed = math.max(now - autoHeal.DropEstimateStartTime, 0)
+	local lost = autoHeal.DropEstimateStartRemaining - remaining
+	if lost <= 0 or elapsed < 1.25 then
 		if autoHeal.DropEstimateLabel ~= "..." then
 			autoHeal.DropEstimateLabel = "..."
 			if autoDropToggleRedraw then
@@ -3041,26 +3089,8 @@ function updateAutoDropEstimate(remaining)
 		end
 		return
 	end
-	if not autoHeal.DropEstimateRate then
-		if autoHeal.DropEstimateLabel ~= "..." then
-			autoHeal.DropEstimateLabel = "..."
-			if autoDropToggleRedraw then
-				autoDropToggleRedraw()
-			end
-		end
-		return
-	end
-	local rate = autoHeal.DropEstimateRate
-	local rawSeconds = remaining / math.max(rate, 0.001)
-	local seconds = rawSeconds
-	if autoHeal.DropEstimateSeconds then
-		local tickingSeconds = math.max(1, autoHeal.DropEstimateSeconds - tickElapsed)
-		if rawSeconds > tickingSeconds + 10 and now - autoHeal.DropEstimateDisplayTime >= 2 then
-			seconds = tickingSeconds + math.min(rawSeconds - tickingSeconds, 8)
-		else
-			seconds = math.min(rawSeconds, tickingSeconds)
-		end
-	end
+	autoHeal.DropEstimateRate = lost / elapsed
+	local seconds = remaining / math.max(autoHeal.DropEstimateRate, 0.001)
 	autoHeal.DropEstimateSeconds = seconds
 	local label = formatShortTime(seconds)
 	if label ~= autoHeal.DropEstimateLabel then
@@ -3069,6 +3099,20 @@ function updateAutoDropEstimate(remaining)
 		if autoDropToggleRedraw then
 			autoDropToggleRedraw()
 		end
+	end
+end
+
+function finishAutoDrop()
+	state.AutoDrop = false
+	autoHeal.DropTimer = 0
+	autoHeal.DropIndex = 1
+	autoHeal.DropHadTargets = false
+	autoHeal.DropEmptySince = 0
+	resetAutoDropEstimate(false)
+	notify("Auto Drop", "Finished dropping selected items.")
+	if autoDropToggleRedraw then
+		autoDropToggleRedraw()
+		task.defer(autoDropToggleRedraw)
 	end
 end
 
@@ -3085,7 +3129,7 @@ function updateAutoDrop(dt)
 		return
 	end
 	autoHeal.DropTimer += dt
-	if autoHeal.DropTimer < math.max(0.001, state.AutoDropDelay / 1000) then
+	if autoHeal.DropTimer < (isVoidWorld() and math.max(2, state.AutoDropDelay / 1000 * 10) or math.max(0.001, state.AutoDropDelay / 1000)) then
 		return
 	end
 	autoHeal.DropTimer = 0
@@ -3106,46 +3150,45 @@ function updateAutoDrop(dt)
 	for slot, item in pairs(inventory or {}) do
 		local quantity = dropItemQuantity(item)
 		if item and item.name and item.name ~= "Rock" and selections.AutoDrop[item.name] and quantity > 0 then
-			slots[item.name] = slot
+			table.insert(slots, { Name = item.name, Slot = slot })
 			remaining += quantity
 		end
 	end
 	updateAutoDropEstimate(remaining)
-	local names = {}
+	local targets = {}
 	for _, name in ipairs(autoHeal.DropOrder) do
-		if slots[name] then
-			table.insert(names, name)
+		for _, target in ipairs(slots) do
+			if target.Name == name then
+				table.insert(targets, target)
+			end
 		end
 	end
-	for name, selected in pairs(selections.AutoDrop) do
-		if selected and slots[name] then
+	for _, target in ipairs(slots) do
+		if selections.AutoDrop[target.Name] then
 			local found = false
-			for _, existingName in ipairs(names) do
-				found = found or existingName == name
+			for _, existingTarget in ipairs(targets) do
+				found = found or existingTarget.Slot == target.Slot
 			end
 			if not found then
-				table.insert(names, name)
+				table.insert(targets, target)
 			end
 		end
 	end
-	if #names == 0 then
+	if #targets == 0 then
 		autoHeal.DropTimer = 0
 		autoHeal.DropIndex = 1
 		if state.AutoDropStopFarming then
+			autoHeal.DropEstimateLabel = ""
+			if autoDropToggleRedraw then
+				autoDropToggleRedraw()
+			end
 			return
 		end
 		local now = os.clock()
 		if autoHeal.DropHadTargets then
 			autoHeal.DropEmptySince = autoHeal.DropEmptySince > 0 and autoHeal.DropEmptySince or now
 			if now - autoHeal.DropEmptySince >= 1.5 then
-				updateAutoDropEstimate(0)
-				notify("Auto Drop", "Finished dropping selected items.")
-				state.AutoDrop = false
-				autoHeal.DropHadTargets = false
-				autoHeal.DropEmptySince = 0
-				if autoDropToggleRedraw then
-					autoDropToggleRedraw()
-				end
+				finishAutoDrop()
 			end
 		else
 			autoHeal.DropEstimateLabel = "..."
@@ -3157,20 +3200,19 @@ function updateAutoDrop(dt)
 	end
 	autoHeal.DropHadTargets = true
 	autoHeal.DropEmptySince = 0
-	if autoHeal.DropIndex > #names then
+	if autoHeal.DropIndex > #targets then
 		autoHeal.DropIndex = 1
 	end
 	local sent = 0
-	while sent < math.min(4, #names) do
-		local itemName = names[autoHeal.DropIndex]
-		local slot = slots[itemName]
-		if slot then
+	while sent < math.min(isVoidWorld() and 1 or 4, #targets) do
+		local target = targets[autoHeal.DropIndex]
+		if target and target.Slot then
 			pcall(function()
-				packet.send(slot)
+				packet.send(target.Slot)
 			end)
 		end
 		autoHeal.DropIndex += 1
-		if autoHeal.DropIndex > #names then
+		if autoHeal.DropIndex > #targets then
 			autoHeal.DropIndex = 1
 		end
 		sent += 1
@@ -3249,10 +3291,6 @@ function nearestEmptyPlantBox(root, range)
 end
 
 function startFarmTweenLoop()
-	if isVoidWorld() then
-		lockedFeatureMessage()
-		return
-	end
 	if autoHeal.FarmTweenLoop then
 		return
 	end
@@ -3263,7 +3301,7 @@ function startFarmTweenLoop()
 			if hum and hum.Health > 0 and root then
 				farmTweenTo(root, nearestEmptyPlantBox(root, state.TweenCheckDistance))
 			end
-			task.wait(1)
+			task.wait(voidSlow(1, 8))
 		end
 		autoHeal.FarmTweenLoop = false
 	end)
@@ -3283,11 +3321,11 @@ function stopFarmTweening()
 end
 
 function updateAutoFarm(dt)
-	if isVoidWorld() or (not state.AutoHarvest and not state.AutoPlant) then
+	if not state.AutoHarvest and not state.AutoPlant then
 		return
 	end
 	autoHeal.FarmTimer += dt
-	if autoHeal.FarmTimer < 0.12 then
+	if autoHeal.FarmTimer < voidSlow(0.12, 5) then
 		return
 	end
 	autoHeal.FarmTimer = 0
@@ -3404,10 +3442,6 @@ function showPlantBoxVisualizer(gridSize)
 end
 
 function placePlantBoxGrid(gridSize)
-	if isVoidWorld() then
-		lockedFeatureMessage()
-		return
-	end
 	if autoHeal.PlantBoxRunning then
 		notify("AutoPlaceBox", "Already placing boxes.")
 		return
@@ -3475,7 +3509,7 @@ function placePlantBoxGrid(gridSize)
 				end
 				sendPlantBoxPlacement(CFrame.new(startPos + Vector3.new(x * spacing, 0, z * spacing)))
 				placed += 1
-				task.wait(0.3)
+				task.wait(voidSlow(0.3, 4))
 			end
 		end
 		autoHeal.PlantBoxRunning = false
@@ -3882,10 +3916,6 @@ function mobAuraTargets()
 end
 
 function updateAuras(dt)
-	if isVoidWorld() then
-		restorePlayerAuraHitboxes()
-		return
-	end
 	if not state.WeaponAura and not state.MineAura and not state.MobAura then
 		if #autoHeal.AuraCandidates > 0 then
 			table.clear(autoHeal.AuraCandidates)
@@ -3901,7 +3931,7 @@ function updateAuras(dt)
 	updatePlayerAuraHitboxes()
 	if state.WeaponAura or state.MineAura then
 		autoHeal.AuraScanTimer += dt
-		if autoHeal.AuraScanTimer >= 5 or #autoHeal.AuraCandidates == 0 then
+		if autoHeal.AuraScanTimer >= voidSlow(5, 15) or #autoHeal.AuraCandidates == 0 then
 			autoHeal.AuraScanTimer = 0
 			refreshAuraCandidates()
 		end
@@ -3928,7 +3958,7 @@ function updateAuras(dt)
 	end
 	if state.WeaponAura or state.MineAura or state.MobAura then
 		autoHeal.FarmAuraTimer += dt
-		if autoHeal.FarmAuraTimer >= 0.1 then
+		if autoHeal.FarmAuraTimer >= voidSlow(0.1, 0.3) then
 			autoHeal.FarmAuraTimer = 0
 			local chosenTargets
 			local chosenType
@@ -4345,9 +4375,12 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 		end
 		if searchBox then
 			local query = string.lower(searchBox.Text)
+			local patternQuery = query:gsub("(%W)", "%%%1")
 			for _, child in ipairs(options:GetChildren()) do
 				if child:IsA("TextButton") then
-					child.Visible = query == "" or string.find(string.lower(child.Name), query, 1, true) ~= nil
+					local lowerName = string.lower(child.Name)
+					local wordMatch = query == "" or string.sub(lowerName, 1, #query) == query or string.find(lowerName, "%f[%w]" .. patternQuery) ~= nil
+					child.Visible = wordMatch
 				end
 			end
 		end
@@ -4532,6 +4565,10 @@ end
 --// Feature logic
 local flyVelocity
 local flyGyro
+local flyCurrentVelocity = Vector3.zero
+local flyBobTime = 0
+local flyIdleAnimationIds = { 507785072, 616111295, 507770239, 507766388 }
+local flyMoveAnimationIds = { 507784897, 507767968, 616111295 }
 local noclipOriginals = {}
 local noclipCollisionGroups = {}
 local noclipTerrainGroup
@@ -4570,6 +4607,81 @@ function clearMovementKeys()
 	end
 end
 
+function flyFacingCFrame(root, cameraCFrame)
+	local look = cameraCFrame and cameraCFrame.LookVector or root.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 0.05 then
+		flat = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	end
+	if flat.Magnitude < 0.05 then
+		flat = Vector3.new(0, 0, -1)
+	end
+	return CFrame.lookAt(root.Position, root.Position + flat.Unit)
+end
+
+function setFlyPose(enabled, moving)
+	local char = character
+	if not char then
+		return
+	end
+	local rightShoulder = char:FindFirstChild("RightShoulder", true) or char:FindFirstChild("Right Shoulder", true)
+	local leftShoulder = char:FindFirstChild("LeftShoulder", true) or char:FindFirstChild("Left Shoulder", true)
+	local waist = char:FindFirstChild("Waist", true)
+	if not enabled then
+		for _, motor in ipairs({ rightShoulder, leftShoulder, waist }) do
+			if motor and motor:IsA("Motor6D") then
+				motor.Transform = CFrame.new()
+			end
+		end
+		return
+	end
+	local reach = moving and -118 or -92
+	if rightShoulder and rightShoulder:IsA("Motor6D") then
+		rightShoulder.Transform = CFrame.Angles(math.rad(reach), math.rad(6), math.rad(18))
+	end
+	if leftShoulder and leftShoulder:IsA("Motor6D") then
+		leftShoulder.Transform = CFrame.Angles(math.rad(reach + 10), math.rad(-8), math.rad(-18))
+	end
+	if waist and waist:IsA("Motor6D") then
+		waist.Transform = moving and CFrame.Angles(math.rad(-8), 0, 0) or CFrame.new()
+	end
+end
+
+function stopFlyAnimation()
+	if autoHeal.FlyTrack then
+		pcall(function()
+			autoHeal.FlyTrack:Stop(0.18)
+			autoHeal.FlyTrack:Destroy()
+		end)
+		autoHeal.FlyTrack = nil
+	end
+	autoHeal.FlyMode = nil
+end
+
+function startFlyAnimation(moving)
+	local _, hum = getCharacterParts()
+	local wantedMode = moving and "Move" or "Idle"
+	if not hum or (autoHeal.FlyTrack and autoHeal.FlyMode == wantedMode) then
+		return
+	end
+	stopFlyAnimation()
+	for _, animationId in ipairs(moving and flyMoveAnimationIds or flyIdleAnimationIds) do
+		local animation = Instance.new("Animation")
+		animation.AnimationId = "rbxassetid://" .. tostring(animationId)
+		local ok, track = pcall(function()
+			return hum:LoadAnimation(animation)
+		end)
+		if ok and track then
+			autoHeal.FlyTrack = track
+			autoHeal.FlyMode = wantedMode
+			track.Looped = true
+			track.Priority = Enum.AnimationPriority.Action
+			track:Play(0.18, 1, 1)
+			return
+		end
+	end
+end
+
 function startFly()
 	local _, hum, root = getCharacterParts()
 	if not hum or not root then
@@ -4586,22 +4698,29 @@ function startFly()
 	hum.PlatformStand = true
 	root.AssemblyLinearVelocity = Vector3.zero
 	root.AssemblyAngularVelocity = Vector3.zero
+	flyCurrentVelocity = Vector3.zero
+	flyBobTime = 0
 	flyVelocity = make("BodyVelocity", {
 		Name = "ControlPanelFlyVelocity",
-		MaxForce = Vector3.new(9e4, 9e4, 9e4),
+		MaxForce = Vector3.new(1e9, 1e9, 1e9),
 		Velocity = Vector3.zero,
-		P = 4500,
+		P = 20000,
 	}, root)
 	flyGyro = make("BodyGyro", {
 		Name = "ControlPanelFlyGyro",
-		MaxTorque = Vector3.new(9e4, 9e4, 9e4),
-		CFrame = root.CFrame,
-		P = 4500,
+		MaxTorque = Vector3.new(1e9, 1e9, 1e9),
+		CFrame = flyFacingCFrame(root, camera and camera.CFrame or root.CFrame),
+		P = 20000,
 	}, root)
+	startFlyAnimation(false)
+	setFlyPose(true, false)
 end
 
 function stopFly()
 	clearMovementKeys()
+	stopFlyAnimation()
+	setFlyPose(false)
+	flyCurrentVelocity = Vector3.zero
 	if flyVelocity then
 		flyVelocity:Destroy()
 		flyVelocity = nil
@@ -4852,7 +4971,7 @@ function setFly(enabled)
 	end
 end
 
-function updateFly()
+function updateFly(dt)
 	if not state.Fly then
 		return
 	end
@@ -4865,26 +4984,55 @@ function updateFly()
 	if not flyVelocity or not flyGyro or flyVelocity.Parent ~= root then
 		startFly()
 	end
-
 	local move = Vector3.zero
-	local cf = camera.CFrame
-	if movementKeys.Forward or state.AutoRun then move += cf.LookVector end
-	if movementKeys.Back then move -= cf.LookVector end
-	if movementKeys.Right then move += cf.RightVector end
-	if movementKeys.Left then move -= cf.RightVector end
+	local cf = camera and camera.CFrame or root.CFrame
+	local look = cf.LookVector
+	local right = cf.RightVector
+	local flatLook = Vector3.new(look.X, 0, look.Z)
+	local flatRight = Vector3.new(right.X, 0, right.Z)
+	if flatLook.Magnitude > 0 then
+		flatLook = flatLook.Unit
+	end
+	if flatRight.Magnitude > 0 then
+		flatRight = flatRight.Unit
+	end
+	if movementKeys.Forward or state.AutoRun then move += flatLook end
+	if movementKeys.Back then move -= flatLook end
+	if movementKeys.Right then move += flatRight end
+	if movementKeys.Left then move -= flatRight end
 	if movementKeys.Up then move += Vector3.yAxis end
 	if movementKeys.Down then move -= Vector3.yAxis end
 
+	local moving = move.Magnitude > 0
+	local targetVelocity
 	if move.Magnitude > 0 then
-		move = move.Unit * state.FlySpeed
+		targetVelocity = move.Unit * state.FlySpeed
+		flyCurrentVelocity = targetVelocity
+		flyBobTime = 0
 	else
-		root.AssemblyLinearVelocity = Vector3.zero
+		flyBobTime += dt
+		targetVelocity = Vector3.new(0, math.sin(flyBobTime * 2.1) * 0.9, 0)
+		local alpha = math.clamp(dt * 5, 0, 1)
+		flyCurrentVelocity = flyCurrentVelocity:Lerp(targetVelocity, alpha)
 		root.AssemblyAngularVelocity = Vector3.zero
 	end
 
-	flyVelocity.Velocity = move
-	flyGyro.CFrame = cf
+	if not moving and math.abs(flyCurrentVelocity.Y) < 0.05 then
+		flyCurrentVelocity = Vector3.new(0, flyCurrentVelocity.Y, 0)
+	end
+	flyVelocity.Velocity = flyCurrentVelocity
+	if not autoHeal.FlyTrack or not autoHeal.FlyTrack.IsPlaying or autoHeal.FlyMode ~= (moving and "Move" or "Idle") then
+		startFlyAnimation(moving)
+	end
+
+	local facing = flyFacingCFrame(root, cf)
+	local localVelocity = facing:VectorToObjectSpace(flyCurrentVelocity)
+	local leanPitch = 0
+	local leanRoll = math.clamp(-localVelocity.X / math.max(state.FlySpeed, 1), -1, 1) * math.rad(8)
+	flyGyro.CFrame = facing * CFrame.Angles(leanPitch, 0, leanRoll)
+	setFlyPose(true, moving)
 	hum.PlatformStand = true
+	hum.AutoRotate = false
 end
 
 function restoreNoclip()
@@ -6699,24 +6847,7 @@ function decodeConfigValue(value)
 end
 
 function lockedConfigStateKey(key)
-	return isVoidWorld() and (
-		key == "AutoHeal"
-		or key == "HealFallback"
-		or key == "AutoHunger"
-		or key == "AutoPickup"
-		or key == "AutoPickupChests"
-		or key == "PickupEssence"
-		or key == "AutoDrop"
-		or key == "AutoHarvest"
-		or key == "AutoPlant"
-		or key == "TweenPlantBoxes"
-		or key == "TweenHarvest"
-		or key == "PlantBoxVisualizer"
-		or key == "ChestPlace"
-		or key == "WeaponAura"
-		or key == "MineAura"
-		or key == "MobAura"
-	)
+	return isVoidWorld() and key == "AutoHeal"
 end
 
 function buildConfigData()
@@ -7408,10 +7539,6 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	end
 
 	if input.KeyCode == state.AuraKey then
-		if isVoidWorld() then
-			lockedFeatureMessage()
-			return
-		end
 		setAllAurasFromKey()
 		return
 	end
@@ -7481,6 +7608,7 @@ connect(player.CharacterAdded, function(newCharacter)
 	humanoid = character:WaitForChild("Humanoid")
 	rootPart = character:WaitForChild("HumanoidRootPart")
 	watchLocalDeath(humanoid)
+	stopFlyAnimation()
 
 	task.wait(0.35)
 	captureDefaultsFromHumanoid(humanoid)
@@ -7527,7 +7655,12 @@ end)
 
 local itemsFolder = workspace:FindFirstChild("Items")
 if itemsFolder then
+	trackPickupContainer(itemsFolder)
+	autoHeal.PickupTrackedInitialized = true
 	connect(itemsFolder.ChildAdded, instantPickupChild)
+	connect(itemsFolder.ChildAdded, trackPickupObject)
+	connect(itemsFolder.DescendantAdded, trackPickupObject)
+	connect(itemsFolder.DescendantAdded, instantPickupChild)
 end
 for _, folderName in ipairs({ "DroppedItems", "Drops" }) do
 	local dropFolder = workspace:FindFirstChild(folderName)
@@ -7538,6 +7671,14 @@ end
 connect(workspace.ChildAdded, function(child)
 	if child.Name == "Items" or child.Name == "DroppedItems" or child.Name == "Drops" then
 		connect(child.ChildAdded, instantPickupChild)
+		if child.Name == "Items" then
+			table.clear(autoHeal.PickupTracked)
+			trackPickupContainer(child)
+			autoHeal.PickupTrackedInitialized = true
+			connect(child.ChildAdded, trackPickupObject)
+			connect(child.DescendantAdded, trackPickupObject)
+			connect(child.DescendantAdded, instantPickupChild)
+		end
 	end
 end)
 
@@ -7560,7 +7701,7 @@ connect(S.RunService.RenderStepped, function(dt)
 	end
 	enforceMovementOverrides()
 	updateFreecam(dt)
-	updateFly()
+	updateFly(dt)
 	updateNoclip(dt)
 	updateAutoRun()
 	updateAutoDisconnect(dt)
