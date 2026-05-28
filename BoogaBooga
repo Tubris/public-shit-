@@ -4582,7 +4582,7 @@ local flyVelocity
 local flyGyro
 local flyCurrentVelocity = Vector3.zero
 local flyBobTime = 0
-local flyIdleAnimationIds = {}
+local flyIdleAnimationIds = { 616111295, 507785072, 507770239 }
 local flyMoveAnimationIds = {}
 local noclipOriginals = {}
 local noclipCollisionGroups = {}
@@ -4674,8 +4674,33 @@ function stopFlyAnimation()
 end
 
 function startFlyAnimation(moving)
+	local wantedMode = moving and "Move" or "Idle"
+	if autoHeal.FlyMode == wantedMode then
+		return
+	end
 	stopFlyAnimation()
-	autoHeal.FlyMode = moving and "Move" or "Idle"
+	autoHeal.FlyMode = wantedMode
+	if moving then
+		return
+	end
+	local _, hum = getCharacterParts()
+	if not hum then
+		return
+	end
+	for _, animationId in ipairs(flyIdleAnimationIds) do
+		local animation = Instance.new("Animation")
+		animation.AnimationId = "rbxassetid://" .. tostring(animationId)
+		local ok, track = pcall(function()
+			return hum:LoadAnimation(animation)
+		end)
+		if ok and track then
+			autoHeal.FlyTrack = track
+			track.Looped = true
+			track.Priority = Enum.AnimationPriority.Action
+			track:Play(0.18, 1, 1)
+			return
+		end
+	end
 end
 
 function startFly()
@@ -5817,12 +5842,16 @@ function hideGodRespawnMarkers()
 		if data.Billboard then
 			data.Billboard.Enabled = false
 		end
+		if data.ScreenLabel then
+			data.ScreenLabel.Visible = false
+		end
 	end
 end
 
 function clearGodRespawnMarkers()
 	for name, data in pairs(autoHeal.GodRespawns) do
 		if data.Billboard then data.Billboard:Destroy() end
+		if data.ScreenLabel then data.ScreenLabel:Destroy() end
 		if data.Marker then data.Marker:Destroy() end
 		autoHeal.GodRespawns[name] = nil
 	end
@@ -5860,6 +5889,7 @@ function updateGodRespawnMarkers(dt)
 					if data.Billboard then
 						data.Billboard.Enabled = false
 					end
+					drawScreenEspLabel(data, data.Marker, false, state.WorldTextSize)
 				elseif data.Position and not data.MissingSince then
 					data.MissingSince = now
 				end
@@ -5876,11 +5906,12 @@ function updateGodRespawnMarkers(dt)
 			local color = data.Color or (name == "Ancient Tree" and Color3.fromRGB(255, 220, 70) or worldRules.God.color)
 			ensureGodRespawnData(name, color)
 			data.Marker.CFrame = CFrame.new(data.Position)
-			data.Billboard.Enabled = true
+			data.Billboard.Enabled = not state.Freecam
 			data.Billboard.Size = UDim2.fromOffset(230, 44)
 			data.Text.TextColor3 = readableEspColor(color)
 			data.Text.TextSize = state.WorldTextSize
 			data.Text.Text = name .. " Respawn: " .. (remaining > 0 and formatRespawnMinutes(remaining) or "soon")
+			drawScreenEspLabel(data, data.Marker, state.Freecam, state.WorldTextSize)
 		end
 	end
 end
@@ -6024,6 +6055,7 @@ function untrackWorldCandidate(instance)
 	esp.Candidates[instance] = nil
 	if esp.World[instance] then
 		if esp.World[instance].Billboard then esp.World[instance].Billboard:Destroy() end
+		if esp.World[instance].ScreenLabel then esp.World[instance].ScreenLabel:Destroy() end
 		if esp.World[instance].Highlight then esp.World[instance].Highlight:Destroy() end
 		if esp.World[instance].Tracer then esp.World[instance].Tracer:Destroy() end
 		esp.World[instance] = nil
@@ -6240,6 +6272,7 @@ function updateWorldEsp()
 	for instance, obj in pairs(esp.World) do
 		if not active[instance] or not obj.Instance.Parent then
 			if obj.Billboard then obj.Billboard:Destroy() end
+			if obj.ScreenLabel then obj.ScreenLabel:Destroy() end
 			if obj.Highlight then obj.Highlight:Destroy() end
 			if obj.Tracer then obj.Tracer:Destroy() end
 			esp.World[instance] = nil
@@ -6438,6 +6471,7 @@ end
 function clearRopeRespawnMarkers()
 	for key, data in pairs(autoHeal.RopeRespawns) do
 		if data.Billboard then data.Billboard:Destroy() end
+		if data.ScreenLabel then data.ScreenLabel:Destroy() end
 		if data.Marker then data.Marker:Destroy() end
 		autoHeal.RopeRespawns[key] = nil
 	end
@@ -6470,6 +6504,9 @@ function updateIslandRopeNotifier(dt)
 			if data.Billboard then
 				data.Billboard.Enabled = false
 			end
+			if data.ScreenLabel then
+				data.ScreenLabel.Visible = false
+			end
 		end
 		return
 	end
@@ -6499,6 +6536,9 @@ function updateIslandRopeNotifier(dt)
 				if respawn and respawn.Billboard then
 					respawn.Billboard.Enabled = false
 				end
+				if respawn and respawn.ScreenLabel then
+					respawn.ScreenLabel.Visible = false
+				end
 				if rope.Health and stateData.Health and rope.Health < stateData.Health then
 					local attackPosition = rope.AttackPart and rope.AttackPart.Position or rope.RopePart and rope.RopePart.Position
 					if attackPosition then
@@ -6524,11 +6564,12 @@ function updateIslandRopeNotifier(dt)
 				local position = stateData.LastPosition or rope.RopePosition
 				local respawn = ensureRopeRespawnData(key, rope.Name)
 				respawn.Marker.CFrame = CFrame.new(position)
-				respawn.Billboard.Enabled = true
+				respawn.Billboard.Enabled = not state.Freecam
 				respawn.Billboard.Size = UDim2.fromOffset(250, 44)
 				respawn.Text.TextColor3 = Color3.fromRGB(210, 175, 255)
 				respawn.Text.TextSize = state.WorldTextSize
 				respawn.Text.Text = rope.Name .. " Rope Respawn: " .. formatRespawnMinutes(360 - (now - stateData.MissingSince))
+				drawScreenEspLabel(respawn, respawn.Marker, state.Freecam, state.WorldTextSize)
 			end
 		end
 	end
