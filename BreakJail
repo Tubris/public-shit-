@@ -1,0 +1,1197 @@
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Stats = game:GetService("Stats")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+local function firstChildByClass(parent, className)
+    if not parent then return nil end
+    for _, child in ipairs(parent:GetChildren()) do
+        if child.ClassName == className then
+            return child
+        end
+    end
+    return nil
+end
+
+if not Players or not LocalPlayer then
+    warn("GUI could not find Players or LocalPlayer.")
+    return
+end
+
+-- ============= MODS SETTINGS =============
+local modsState = {
+    speedEnabled = false,
+    jumpEnabled = false,
+    noRecoilEnabled = true,
+    autoFireEnabled = true,
+    swatEnabled = true,
+    desiredSpeed = 60,
+    desiredJumpPower = 120,
+}
+
+-- ============= MOVEMENT BYPASS =============
+local bodyVelocity = nil
+local isJumping = false
+local movementConnection = nil
+local connections = {}
+
+-- ============= INF NITRO =============
+local function setupInfNitro()
+    local function hotkeyHandler(key)
+        if key == 'q' then
+            for _, v in next, getgc(true) do
+                if type(v) == 'table' and rawget(v, 'Nitro') then
+                    v.Nitro = 250
+                end
+            end
+        end
+    end
+    Mouse.KeyDown:connect(hotkeyHandler)
+    print("[Inf Nitrous] Activated - Press Q")
+end
+
+-- ============= HYPER SHIFT =============
+local hypershiftRunning = false
+local hypershiftThread = nil
+
+local function setupHypershift()
+    if hypershiftRunning then return end
+    hypershiftRunning = true
+    
+    local P, RS = Players, ReplicatedStorage
+    local plr = LocalPlayer
+    local c = plr.Character or plr.CharacterAdded:Wait()
+    local r, h = c:WaitForChild("HumanoidRootPart", 5), c:WaitForChild("Humanoid", 5)
+    local V = require(RS.Vehicle.VehicleUtils)
+    local chrome = "HyperShift"
+    
+    plr.CharacterAdded:Connect(function(char) 
+        c, r, h = char, char:WaitForChild("HumanoidRootPart", 5), char:WaitForChild("Humanoid", 5) 
+    end)
+    
+    hypershiftThread = task.spawn(function()
+        while hypershiftRunning do
+            local v = V.GetLocalVehiclePacket() and V.GetLocalVehicleModel()
+            if v then
+                v:SetAttribute("HyperChromeAppliedName", chrome)
+                for _, p in pairs(v:GetDescendants()) do
+                    if p:IsA("BasePart") or p:IsA("MeshPart") then 
+                        p:SetAttribute("HyperChromeAppliedName", chrome) 
+                    end
+                end
+            end
+            task.wait(1)
+        end
+    end)
+    
+    print("[HyperShift] Activated")
+end
+
+local function stopHypershift()
+    hypershiftRunning = false
+    if hypershiftThread then
+        task.cancel(hypershiftThread)
+        hypershiftThread = nil
+    end
+end
+
+-- ============= MOVEMENT BYPASS =============
+local function setupMovement()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoid or not rootPart then return end
+    
+    humanoid.WalkSpeed = 16
+    humanoid.JumpPower = 50
+    
+    if modsState.speedEnabled then
+        if not bodyVelocity or bodyVelocity.Parent ~= rootPart then
+            if bodyVelocity then bodyVelocity:Destroy() end
+            bodyVelocity = Instance.new("BodyVelocity")
+            bodyVelocity.Name = "SpeedBooster"
+            bodyVelocity.MaxForce = Vector3.new(100000, 0, 100000)
+            bodyVelocity.Parent = rootPart
+        end
+    else
+        if bodyVelocity then
+            bodyVelocity:Destroy()
+            bodyVelocity = nil
+        end
+    end
+end
+
+local function updateMovement()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoid or not rootPart then return end
+    
+    humanoid.WalkSpeed = 16
+    humanoid.JumpPower = 50
+    
+    local moveVector = Vector3.new()
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveVector = moveVector + Vector3.new(0, 0, -1) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveVector = moveVector + Vector3.new(0, 0, 1) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveVector = moveVector + Vector3.new(-1, 0, 0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveVector = moveVector + Vector3.new(1, 0, 0) end
+    
+    if modsState.speedEnabled and moveVector.Magnitude > 0 then
+        if not bodyVelocity or bodyVelocity.Parent ~= rootPart then
+            setupMovement()
+        end
+        
+        if bodyVelocity then
+            moveVector = moveVector.Unit
+            local camera = workspace.CurrentCamera
+            local forward = camera.CFrame.LookVector
+            local right = camera.CFrame.RightVector
+            
+            forward = Vector3.new(forward.X, 0, forward.Z).Unit
+            right = Vector3.new(right.X, 0, right.Z).Unit
+            
+            local direction = (forward * -moveVector.Z + right * moveVector.X).Unit
+            bodyVelocity.Velocity = Vector3.new(direction.X * modsState.desiredSpeed, rootPart.Velocity.Y, direction.Z * modsState.desiredSpeed)
+        end
+    elseif bodyVelocity then
+        bodyVelocity.Velocity = Vector3.new(0, bodyVelocity.Velocity.Y, 0)
+    end
+    
+    if modsState.jumpEnabled then
+        local spacePressed = UserInputService:IsKeyDown(Enum.KeyCode.Space)
+        local onGround = humanoid.FloorMaterial ~= Enum.Material.Air
+        
+        if spacePressed and not isJumping and onGround then
+            isJumping = true
+            local jumpPower = math.min(modsState.desiredJumpPower, 180)
+            rootPart.Velocity = Vector3.new(rootPart.Velocity.X, jumpPower, rootPart.Velocity.Z)
+            task.wait(0.3)
+            isJumping = false
+        end
+    end
+end
+
+-- ============= GUN MODS =============
+local originalGunConfigs = {}
+
+local function saveOriginalGunConfig(gun)
+    if not gun or not gun.Config then return end
+    if originalGunConfigs[gun] then return end
+    
+    originalGunConfigs[gun] = {
+        CamShakeMagnitude = gun.Config.CamShakeMagnitude,
+        FireAuto = gun.Config.FireAuto,
+        FireAutoMobile = gun.Config.FireAutoMobile,
+        _hasSWAT = gun._hasSWAT,
+    }
+end
+
+local function applyGunMods(gun)
+    if not gun or not gun.Config then return end
+    
+    saveOriginalGunConfig(gun)
+    
+    local orig = originalGunConfigs[gun]
+    if not orig then return end
+    
+    if modsState.noRecoilEnabled then
+        gun.Config.CamShakeMagnitude = 0
+    else
+        gun.Config.CamShakeMagnitude = orig.CamShakeMagnitude
+    end
+    
+    if modsState.autoFireEnabled then
+        gun.Config.FireAuto = true
+        gun.Config.FireAutoMobile = true
+    else
+        gun.Config.FireAuto = orig.FireAuto
+        gun.Config.FireAutoMobile = orig.FireAutoMobile
+    end
+    
+    if modsState.swatEnabled then
+        gun._hasSWAT = true
+    else
+        gun._hasSWAT = orig._hasSWAT or false
+    end
+end
+
+local function refreshAllGuns()
+    for gun, _ in pairs(originalGunConfigs) do
+        if gun and gun.Config then
+            applyGunMods(gun)
+        else
+            originalGunConfigs[gun] = nil
+        end
+    end
+end
+
+local function onGunToggleChanged()
+    refreshAllGuns()
+    pcall(scanForGuns)
+end
+
+-- Hook gun creation
+local gunTypes = {"Gun", "Pistol", "Rifle", "Shotgun", "Sniper", "Revolver"}
+
+for _, gunType in pairs(gunTypes) do
+    local path = ReplicatedStorage:FindFirstChild("Game")
+    if path then
+        path = path:FindFirstChild("Item")
+        if path then
+            local gunPath = path:FindFirstChild(gunType)
+            if gunPath then
+                local success, GunClass = pcall(require, gunPath)
+                if success and GunClass and GunClass.new then
+                    local oldNew = GunClass.new
+                    GunClass.new = function(...)
+                        local gun = oldNew(...)
+                        task.spawn(function()
+                            task.wait(0.1)
+                            saveOriginalGunConfig(gun)
+                            applyGunMods(gun)
+                        end)
+                        return gun
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function scanForGuns()
+    for _, v in pairs(getgc and getgc() or {}) do
+        if type(v) == "table" and v.Config then
+            local isGun = v.__ClassName == "Gun" or v.__ClassName == "Pistol" or v.__ClassName == "Rifle"
+            if isGun then
+                saveOriginalGunConfig(v)
+                applyGunMods(v)
+            end
+        end
+    end
+end
+
+-- ============= ESP STATE =============
+local state = {
+    esp = true,
+    distance = true,
+    health = true,
+    teamPolice = true,
+    teamCriminal = true,
+    teamPrisoner = true,
+    minimized = false,
+    guiVisible = true,
+    guiKeybind = Enum.KeyCode.Return,
+}
+
+local espObjects = {}
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JailbreakMe"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.IgnoreGuiInset = true
+
+local ok = pcall(function()
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end)
+if not ok then
+    screenGui.Parent = game:GetService("CoreGui")
+end
+
+local function addCorner(parent, radius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, radius)
+    corner.Parent = parent
+    return corner
+end
+
+local function addStroke(parent, color, transparency)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = color
+    stroke.Transparency = transparency or 0
+    stroke.Thickness = 1
+    stroke.Parent = parent
+    return stroke
+end
+
+local shadow = Instance.new("Frame")
+shadow.Name = "Shadow"
+shadow.Size = UDim2.new(0, 400, 0, 500)
+shadow.Position = UDim2.new(0.5, -200, 0.5, -250)
+shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+shadow.BackgroundTransparency = 0.62
+shadow.BorderSizePixel = 0
+shadow.Parent = screenGui
+addCorner(shadow, 18)
+
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0, 340, 0, 480)
+main.Position = UDim2.new(0.5, -170, 0.5, -240)
+main.BackgroundColor3 = Color3.fromRGB(11, 7, 18)
+main.BackgroundTransparency = 0.42
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = screenGui
+addCorner(main, 14)
+addStroke(main, Color3.fromRGB(122, 72, 205), 0.22)
+
+local function syncShadow()
+    shadow.Position = UDim2.new(main.Position.X.Scale, main.Position.X.Offset - 8, main.Position.Y.Scale, main.Position.Y.Offset - 8)
+    shadow.Size = UDim2.new(main.Size.X.Scale, main.Size.X.Offset + 16, main.Size.Y.Scale, main.Size.Y.Offset + 16)
+end
+
+main:GetPropertyChangedSignal("Position"):Connect(syncShadow)
+main:GetPropertyChangedSignal("Size"):Connect(syncShadow)
+syncShadow()
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = Color3.fromRGB(35, 18, 58)
+titleBar.BackgroundTransparency = 0.08
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+addCorner(titleBar, 14)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -96, 1, 0)
+title.Position = UDim2.new(0, 12, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "🔓 JAILBREAK ME 🔓"
+title.TextColor3 = Color3.fromRGB(255, 100, 50)
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+local function topButton(text, xOffset, color)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 28, 0, 24)
+    button.Position = UDim2.new(1, xOffset, 0.5, -12)
+    button.BackgroundColor3 = color
+    button.BorderSizePixel = 0
+    button.Text = text
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 14
+    button.Font = Enum.Font.GothamBold
+    button.AutoButtonColor = false
+    button.Parent = titleBar
+    addCorner(button, 6)
+    return button
+end
+
+local minimizeButton = topButton("-", -66, Color3.fromRGB(78, 48, 124))
+local closeButton = topButton("X", -34, Color3.fromRGB(174, 66, 112))
+
+local statsPill = Instance.new("Frame")
+statsPill.Name = "StatsHud"
+statsPill.Size = UDim2.new(0, 150, 0, 24)
+statsPill.Position = UDim2.new(1, -164, 0, 12)
+statsPill.BackgroundColor3 = Color3.fromRGB(9, 6, 15)
+statsPill.BackgroundTransparency = 0.28
+statsPill.BorderSizePixel = 0
+statsPill.Parent = screenGui
+addCorner(statsPill, 9)
+addStroke(statsPill, Color3.fromRGB(155, 95, 255), 0.45)
+
+local statsLabel = Instance.new("TextLabel")
+statsLabel.Size = UDim2.new(1, -10, 1, 0)
+statsLabel.Position = UDim2.new(0, 5, 0, 0)
+statsLabel.BackgroundTransparency = 1
+statsLabel.Text = ""
+statsLabel.TextColor3 = Color3.fromRGB(230, 214, 255)
+statsLabel.TextStrokeTransparency = 0.65
+statsLabel.TextSize = 11
+statsLabel.Font = Enum.Font.GothamBold
+statsLabel.Parent = statsPill
+
+-- TABS
+local tabBar = Instance.new("Frame")
+tabBar.Name = "TabBar"
+tabBar.Size = UDim2.new(1, 0, 0, 36)
+tabBar.Position = UDim2.new(0, 0, 0, 40)
+tabBar.BackgroundColor3 = Color3.fromRGB(18, 10, 30)
+tabBar.BackgroundTransparency = 0.3
+tabBar.BorderSizePixel = 0
+tabBar.Parent = main
+
+local espTabBtn = Instance.new("TextButton")
+espTabBtn.Size = UDim2.new(0.5, -2, 1, -4)
+espTabBtn.Position = UDim2.new(0, 2, 0, 2)
+espTabBtn.BackgroundColor3 = Color3.fromRGB(138, 84, 230)
+espTabBtn.Text = "ESP"
+espTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+espTabBtn.TextSize = 13
+espTabBtn.Font = Enum.Font.GothamBold
+espTabBtn.Parent = tabBar
+addCorner(espTabBtn, 6)
+
+local modsTabBtn = Instance.new("TextButton")
+modsTabBtn.Size = UDim2.new(0.5, -2, 1, -4)
+modsTabBtn.Position = UDim2.new(0.5, 0, 0, 2)
+modsTabBtn.BackgroundColor3 = Color3.fromRGB(54, 43, 70)
+modsTabBtn.Text = "MODS"
+modsTabBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+modsTabBtn.TextSize = 13
+modsTabBtn.Font = Enum.Font.GothamBold
+modsTabBtn.Parent = tabBar
+addCorner(modsTabBtn, 6)
+
+local content = Instance.new("ScrollingFrame")
+content.Name = "Content"
+content.Size = UDim2.new(1, -18, 1, -92)
+content.Position = UDim2.new(0, 9, 0, 82)
+content.BackgroundTransparency = 1
+content.BorderSizePixel = 0
+content.ScrollBarThickness = 4
+content.ScrollBarImageColor3 = Color3.fromRGB(156, 100, 240)
+content.CanvasSize = UDim2.new(0, 0, 0, 0)
+content.Parent = main
+
+local columns = Instance.new("UIListLayout")
+columns.FillDirection = Enum.FillDirection.Vertical
+columns.HorizontalAlignment = Enum.HorizontalAlignment.Left
+columns.VerticalAlignment = Enum.VerticalAlignment.Top
+columns.SortOrder = Enum.SortOrder.LayoutOrder
+columns.Padding = UDim.new(0, 10)
+columns.Parent = content
+
+columns:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    content.CanvasSize = UDim2.new(0, 0, 0, columns.AbsoluteContentSize.Y + 12)
+end)
+
+-- MODS CONTENT
+local modsContent = Instance.new("ScrollingFrame")
+modsContent.Name = "ModsContent"
+modsContent.Size = UDim2.new(1, -18, 1, -92)
+modsContent.Position = UDim2.new(0, 9, 0, 82)
+modsContent.BackgroundTransparency = 1
+modsContent.BorderSizePixel = 0
+modsContent.ScrollBarThickness = 4
+modsContent.ScrollBarImageColor3 = Color3.fromRGB(156, 100, 240)
+modsContent.CanvasSize = UDim2.new(0, 0, 0, 0)
+modsContent.Visible = false
+modsContent.Parent = main
+
+local modsLayout = Instance.new("UIListLayout")
+modsLayout.FillDirection = Enum.FillDirection.Vertical
+modsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+modsLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+modsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+modsLayout.Padding = UDim.new(0, 10)
+modsLayout.Parent = modsContent
+
+modsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    modsContent.CanvasSize = UDim2.new(0, 0, 0, modsLayout.AbsoluteContentSize.Y + 12)
+end)
+
+-- PANEL CREATORS
+local function makePanel(name, order, openHeight)
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.new(1, -6, 0, openHeight)
+    panel.BackgroundColor3 = Color3.fromRGB(18, 10, 30)
+    panel.BackgroundTransparency = 0.18
+    panel.BorderSizePixel = 0
+    panel.LayoutOrder = order
+    panel.Parent = content
+    addCorner(panel, 10)
+    addStroke(panel, Color3.fromRGB(111, 70, 180), 0.42)
+
+    local header = Instance.new("TextButton")
+    header.Size = UDim2.new(1, 0, 0, 34)
+    header.BackgroundTransparency = 1
+    header.Text = name
+    header.TextColor3 = Color3.fromRGB(227, 214, 255)
+    header.TextSize = 13
+    header.Font = Enum.Font.GothamBold
+    header.AutoButtonColor = false
+    header.Parent = panel
+
+    local body = Instance.new("Frame")
+    body.Name = "Body"
+    body.Size = UDim2.new(1, -16, 1, -42)
+    body.Position = UDim2.new(0, 8, 0, 36)
+    body.BackgroundTransparency = 1
+    body.Parent = panel
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 8)
+    layout.Parent = body
+
+    local collapsed = false
+    header.MouseButton1Click:Connect(function()
+        collapsed = not collapsed
+        body.Visible = not collapsed
+        TweenService:Create(panel, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+            Size = collapsed and UDim2.new(1, -6, 0, 34) or UDim2.new(1, -6, 0, openHeight)
+        }):Play()
+    end)
+
+    return body
+end
+
+-- Auto-sizing mods panel
+local function makeModsPanel(name, order)
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.new(1, -6, 0, 100)
+    panel.BackgroundColor3 = Color3.fromRGB(18, 10, 30)
+    panel.BackgroundTransparency = 0.18
+    panel.BorderSizePixel = 0
+    panel.LayoutOrder = order
+    panel.Parent = modsContent
+    addCorner(panel, 10)
+    addStroke(panel, Color3.fromRGB(111, 70, 180), 0.42)
+
+    local header = Instance.new("TextButton")
+    header.Size = UDim2.new(1, 0, 0, 34)
+    header.BackgroundTransparency = 1
+    header.Text = name
+    header.TextColor3 = Color3.fromRGB(227, 214, 255)
+    header.TextSize = 13
+    header.Font = Enum.Font.GothamBold
+    header.AutoButtonColor = false
+    header.Parent = panel
+
+    local body = Instance.new("Frame")
+    body.Name = "Body"
+    body.Size = UDim2.new(1, -16, 0, 0)
+    body.Position = UDim2.new(0, 8, 0, 36)
+    body.BackgroundTransparency = 1
+    body.AutomaticSize = Enum.AutomaticSize.Y
+    body.Parent = panel
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 8)
+    layout.Parent = body
+    
+    local function updatePanelHeight()
+        panel.Size = UDim2.new(1, -6, 0, body.AbsoluteSize.Y + 42)
+    end
+    
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updatePanelHeight)
+    body:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePanelHeight)
+    task.wait(0.1)
+    updatePanelHeight()
+
+    return body
+end
+
+-- Helper: Create Button (for vehicle mods)
+local function makeButton(parent, labelText, color, callback)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 38)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 1, 0)
+    button.BackgroundColor3 = color
+    button.Text = labelText
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 13
+    button.Font = Enum.Font.GothamBold
+    button.Parent = row
+    addCorner(button, 8)
+    
+    button.MouseButton1Click:Connect(callback)
+    
+    return button
+end
+
+-- TOGGLE AND SLIDER HELPERS
+local function makeToggle(parent, labelText, defaultValue, callback)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 30)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -54, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(229, 221, 246)
+    label.TextSize = 12
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = row
+
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 44, 0, 22)
+    button.Position = UDim2.new(1, -44, 0.5, -11)
+    button.BackgroundColor3 = defaultValue and Color3.fromRGB(138, 84, 230) or Color3.fromRGB(54, 43, 70)
+    button.Text = ""
+    button.BorderSizePixel = 0
+    button.AutoButtonColor = false
+    button.Parent = row
+    addCorner(button, 11)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Position = defaultValue and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+    knob.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
+    knob.BorderSizePixel = 0
+    knob.Parent = button
+    addCorner(knob, 9)
+
+    local value = defaultValue
+    local function setValue(nextValue)
+        value = nextValue
+        TweenService:Create(button, TweenInfo.new(0.12), {
+            BackgroundColor3 = value and Color3.fromRGB(138, 84, 230) or Color3.fromRGB(54, 43, 70)
+        }):Play()
+        TweenService:Create(knob, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+            Position = value and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        }):Play()
+        if callback then callback(value) end
+    end
+
+    button.MouseButton1Click:Connect(function()
+        setValue(not value)
+    end)
+
+    return function() return value end, setValue
+end
+
+local function makeSlider(parent, labelText, minValue, maxValue, defaultValue, callback)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 48)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -44, 0, 18)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(229, 221, 246)
+    label.TextSize = 12
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = row
+
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Size = UDim2.new(0, 44, 0, 18)
+    valueLabel.Position = UDim2.new(1, -44, 0, 0)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.TextColor3 = Color3.fromRGB(183, 137, 255)
+    valueLabel.TextSize = 12
+    valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.Parent = row
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, 0, 0, 6)
+    bar.Position = UDim2.new(0, 0, 0, 31)
+    bar.BackgroundColor3 = Color3.fromRGB(54, 43, 70)
+    bar.BorderSizePixel = 0
+    bar.Parent = row
+    addCorner(bar, 3)
+
+    local fill = Instance.new("Frame")
+    fill.BackgroundColor3 = Color3.fromRGB(156, 100, 240)
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+    addCorner(fill, 3)
+
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 16, 0, 16)
+    knob.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
+    knob.BorderSizePixel = 0
+    knob.Text = ""
+    knob.AutoButtonColor = false
+    knob.Parent = bar
+    addCorner(knob, 8)
+
+    local value = defaultValue
+    local function setValue(nextValue)
+        value = math.clamp(nextValue, minValue, maxValue)
+        local pct = (value - minValue) / (maxValue - minValue)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        knob.Position = UDim2.new(pct, -8, 0.5, -8)
+        valueLabel.Text = tostring(math.floor(value + 0.5))
+        if callback then callback(value) end
+    end
+
+    local function setFromX(x)
+        local pct = math.clamp((x - bar.AbsolutePosition.X) / math.max(1, bar.AbsoluteSize.X), 0, 1)
+        setValue(minValue + pct * (maxValue - minValue))
+    end
+
+    local dragging = false
+    knob.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            setFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    setValue(defaultValue)
+    return function() return value end, setValue
+end
+
+local function keyName(keyCode)
+    if keyCode == Enum.KeyCode.LeftControl then return "LeftCtrl" end
+    if keyCode == Enum.KeyCode.RightControl then return "RightCtrl" end
+    return string.gsub(keyCode.Name, "Control", "Ctrl")
+end
+
+local capturingKeybind = false
+local pendingKeybindSetter = nil
+
+local function makeKeybind(parent, labelText, defaultKey, callback)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 34)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -102, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(229, 221, 246)
+    label.TextSize = 12
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = row
+
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 92, 0, 26)
+    button.Position = UDim2.new(1, -92, 0.5, -13)
+    button.BackgroundColor3 = Color3.fromRGB(35, 23, 54)
+    button.BorderSizePixel = 0
+    button.Text = keyName(defaultKey)
+    button.TextColor3 = Color3.fromRGB(236, 226, 255)
+    button.TextSize = 12
+    button.Font = Enum.Font.GothamBold
+    button.AutoButtonColor = false
+    button.Parent = row
+    addCorner(button, 7)
+    addStroke(button, Color3.fromRGB(111, 70, 180), 0.45)
+
+    local setKey
+    setKey = function(keyCode)
+        capturingKeybind = false
+        pendingKeybindSetter = nil
+        button.Text = keyName(keyCode)
+        if callback then callback(keyCode) end
+    end
+
+    button.MouseButton1Click:Connect(function()
+        capturingKeybind = true
+        pendingKeybindSetter = setKey
+        button.Text = "Press key"
+    end)
+
+    return setKey
+end
+
+-- BUILD ESP PANELS
+local visualPanel = makePanel("Visuals", 1, 138)
+local teamPanel = makePanel("Teams", 2, 138)
+local settingsPanel = makePanel("Settings", 3, 78)
+
+makeToggle(visualPanel, "ESP Enabled", state.esp, function(v) state.esp = v end)
+makeToggle(visualPanel, "Show Distance", state.distance, function(v) state.distance = v end)
+makeToggle(visualPanel, "Show Health", state.health, function(v) state.health = v end)
+
+makeToggle(teamPanel, "Police", state.teamPolice, function(v) state.teamPolice = v end)
+makeToggle(teamPanel, "Criminal", state.teamCriminal, function(v) state.teamCriminal = v end)
+makeToggle(teamPanel, "Prisoner", state.teamPrisoner, function(v) state.teamPrisoner = v end)
+
+-- BUILD MODS PANELS
+local movementPanel = makeModsPanel("🏃 MOVEMENT", 1)
+local weaponPanel = makeModsPanel("🔫 WEAPON", 2)
+local vehiclePanel = makeModsPanel("🚗 VEHICLE", 3)
+
+makeToggle(movementPanel, "Speed Bypass", modsState.speedEnabled, function(v)
+    modsState.speedEnabled = v
+    if not v and bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
+    end
+    setupMovement()
+end)
+
+makeSlider(movementPanel, "Speed Amount", 30, 200, modsState.desiredSpeed, function(v)
+    modsState.desiredSpeed = v
+end)
+
+makeToggle(movementPanel, "Jump Bypass", modsState.jumpEnabled, function(v)
+    modsState.jumpEnabled = v
+end)
+
+makeSlider(movementPanel, "Jump Power", 50, 180, modsState.desiredJumpPower, function(v)
+    modsState.desiredJumpPower = math.min(v, 180)
+end)
+
+makeToggle(weaponPanel, "No Recoil / Camera Shake", modsState.noRecoilEnabled, function(v)
+    modsState.noRecoilEnabled = v
+    onGunToggleChanged()
+end)
+
+makeToggle(weaponPanel, "Auto Fire (Hold to Shoot)", modsState.autoFireEnabled, function(v)
+    modsState.autoFireEnabled = v
+    onGunToggleChanged()
+end)
+
+makeToggle(weaponPanel, "SWAT Skin (Silenced Sound)", modsState.swatEnabled, function(v)
+    modsState.swatEnabled = v
+    onGunToggleChanged()
+end)
+
+-- Vehicle Mods (Buttons that just run the code)
+makeButton(vehiclePanel, "🔥 ACTIVATE INF NITROUS (Press Q)", Color3.fromRGB(200, 80, 0), function()
+    setupInfNitro()
+end)
+
+makeButton(vehiclePanel, "⚡ ACTIVATE HYPER SHIFT", Color3.fromRGB(0, 150, 200), function()
+    setupHypershift()
+end)
+
+-- TAB SWITCHING
+local function switchToEsp()
+    content.Visible = true
+    modsContent.Visible = false
+    espTabBtn.BackgroundColor3 = Color3.fromRGB(138, 84, 230)
+    modsTabBtn.BackgroundColor3 = Color3.fromRGB(54, 43, 70)
+    espTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    modsTabBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+end
+
+local function switchToMods()
+    content.Visible = false
+    modsContent.Visible = true
+    modsTabBtn.BackgroundColor3 = Color3.fromRGB(138, 84, 230)
+    espTabBtn.BackgroundColor3 = Color3.fromRGB(54, 43, 70)
+    modsTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    espTabBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+end
+
+espTabBtn.MouseButton1Click:Connect(switchToEsp)
+modsTabBtn.MouseButton1Click:Connect(switchToMods)
+
+-- KEYBINDS
+local setGuiKeybind = makeKeybind(settingsPanel, "Menu Key", state.guiKeybind, function(keyCode)
+    state.guiKeybind = keyCode
+end)
+
+-- GUI VISIBILITY
+local function setGuiVisible(visible)
+    state.guiVisible = visible
+    main.Visible = visible
+    shadow.Visible = visible
+end
+
+-- DRAGGING GUI
+local draggingGui = false
+local dragStart
+local startPosition
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingGui = true
+        dragStart = input.Position
+        startPosition = main.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if draggingGui and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        TweenService:Create(main, TweenInfo.new(0.045, Enum.EasingStyle.Linear), {
+            Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+        }):Play()
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingGui = false
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if capturingKeybind then
+        if pendingKeybindSetter then
+            pendingKeybindSetter(input.KeyCode)
+        end
+        return
+    end
+    if gameProcessed then return end
+    if input.KeyCode == state.guiKeybind then
+        setGuiVisible(not state.guiVisible)
+    end
+end)
+
+minimizeButton.MouseButton1Click:Connect(function()
+    state.minimized = not state.minimized
+    content.Visible = not state.minimized
+    modsContent.Visible = not state.minimized and modsContent.Visible
+    tabBar.Visible = not state.minimized
+    minimizeButton.Text = state.minimized and "+" or "-"
+    TweenService:Create(main, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+        Size = state.minimized and UDim2.new(0, 340, 0, 40) or UDim2.new(0, 340, 0, 480)
+    }):Play()
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+    if hypershiftRunning then
+        stopHypershift()
+    end
+    for _, conn in ipairs(connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    for _, data in pairs(espObjects) do
+        pcall(function() data.gui:Destroy() end)
+    end
+    screenGui:Destroy()
+end)
+
+-- ESP FUNCTIONS
+local function currentPlayers()
+    local playersFolder = firstChildByClass(game, "Players") or Players
+    return playersFolder:GetPlayers()
+end
+
+local function workspaceModelsByName()
+    local world = firstChildByClass(game, "Workspace") or Workspace
+    local byName = {}
+    for _, child in ipairs(world:GetChildren()) do
+        if child.ClassName == "Model" then
+            byName[child.Name] = child
+        end
+    end
+    return byName
+end
+
+local function characterModelForPlayer(player, modelCache)
+    if modelCache and modelCache[player.Name] then
+        return modelCache[player.Name]
+    end
+    if player.Character and player.Character.ClassName == "Model" then
+        return player.Character
+    end
+    return nil
+end
+
+local function humanoidFor(model)
+    if not model then return nil end
+    local direct = model:FindFirstChild("Humanoid")
+    if direct and direct.ClassName == "Humanoid" then
+        return direct
+    end
+    return firstChildByClass(model, "Humanoid")
+end
+
+local function rootPartFor(model)
+    if not model then return nil end
+    return model:FindFirstChild("HumanoidRootPart")
+        or model:FindFirstChild("UpperTorso")
+        or model:FindFirstChild("Torso")
+        or model.PrimaryPart
+        or firstChildByClass(model, "BasePart")
+end
+
+local function playerTeam(player)
+    local teamName = player.Team and player.Team.Name or "Unknown"
+    if string.find(teamName, "Police") then return "Police" end
+    if string.find(teamName, "Criminal") then return "Criminal" end
+    if string.find(teamName, "Prisoner") then return "Prisoner" end
+
+    local respawn = player:FindFirstChild("RespawnLocation")
+    if respawn then
+        local text = tostring(respawn.Value or respawn.Name)
+        if string.find(text, "Police") then return "Police" end
+        if string.find(text, "Criminal") then return "Criminal" end
+        if string.find(text, "Prisoner") then return "Prisoner" end
+    end
+
+    return "Unknown"
+end
+
+local function teamAllowed(team)
+    if team == "Police" then return state.teamPolice end
+    if team == "Criminal" then return state.teamCriminal end
+    if team == "Prisoner" then return state.teamPrisoner end
+    return true
+end
+
+local function teamColor(team)
+    if team == "Police" then return Color3.fromRGB(71, 156, 255) end
+    if team == "Criminal" then return Color3.fromRGB(235, 91, 91) end
+    if team == "Prisoner" then return Color3.fromRGB(245, 163, 74) end
+    return Color3.fromRGB(220, 224, 230)
+end
+
+local function createEsp(player, model)
+    local old = espObjects[player]
+    if old then
+        pcall(function() old.gui:Destroy() end)
+    end
+
+    local root = rootPartFor(model)
+    if not root then return end
+
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "ESP_" .. player.Name
+    gui.Size = UDim2.new(0, 260, 0, 28)
+    gui.Adornee = root
+    gui.AlwaysOnTop = true
+    gui.StudsOffset = Vector3.new(0, 3.1, 0)
+    gui.Enabled = state.esp
+    gui.Parent = screenGui
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(6, 4, 10)
+    bg.BackgroundTransparency = 1
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local name = Instance.new("TextLabel")
+    name.Size = UDim2.new(1, -16, 1, 0)
+    name.Position = UDim2.new(0, 8, 0, 0)
+    name.BackgroundTransparency = 1
+    name.TextColor3 = Color3.fromRGB(255, 255, 255)
+    name.TextStrokeTransparency = 0.25
+    name.TextSize = 12
+    name.Font = Enum.Font.GothamBold
+    name.TextXAlignment = Enum.TextXAlignment.Center
+    name.Parent = bg
+
+    espObjects[player] = {
+        gui = gui,
+        name = name,
+        model = model,
+    }
+end
+
+local function destroyEsp(player)
+    local data = espObjects[player]
+    if data then
+        pcall(function() data.gui:Destroy() end)
+        espObjects[player] = nil
+    end
+end
+
+local fpsFrames = 0
+local fpsElapsed = 0
+local shownFps = 0
+
+table.insert(connections, RunService.RenderStepped:Connect(function(deltaTime)
+    fpsFrames = fpsFrames + 1
+    fpsElapsed = fpsElapsed + deltaTime
+    if fpsElapsed >= 0.5 then
+        shownFps = math.floor((fpsFrames / fpsElapsed) + 0.5)
+        fpsFrames = 0
+        fpsElapsed = 0
+        statsLabel.Text = string.format("%d FPS", shownFps)
+    end
+
+    Camera = Workspace.CurrentCamera or Camera
+    
+    local modelCache = workspaceModelsByName()
+    local wanted = {}
+
+    for _, player in ipairs(currentPlayers()) do
+        if player ~= LocalPlayer then
+            local team = playerTeam(player)
+            local model = characterModelForPlayer(player, modelCache)
+            local humanoid = humanoidFor(model)
+            local root = rootPartFor(model)
+
+            if model and humanoid and root and teamAllowed(team) then
+                wanted[player] = true
+                if not espObjects[player] or espObjects[player].model ~= model then
+                    createEsp(player, model)
+                end
+
+                local data = espObjects[player]
+                if data then
+                    data.gui.Enabled = state.esp
+                    data.gui.Adornee = root
+                    data.name.TextColor3 = teamColor(team)
+                    local parts = {player.Name}
+                    if state.health then
+                        local pct = math.clamp(humanoid.Health / math.max(1, humanoid.MaxHealth), 0, 1)
+                        table.insert(parts, string.format("%d%%", math.floor((pct * 100) + 0.5)))
+                    end
+                    if state.distance and Camera then
+                        table.insert(parts, string.format("%dm", math.floor((root.Position - Camera.CFrame.Position).Magnitude + 0.5)))
+                    end
+                    data.name.Text = table.concat(parts, " | ")
+                end
+            else
+                destroyEsp(player)
+            end
+        end
+    end
+
+    for player in pairs(espObjects) do
+        if not wanted[player] or not player.Parent then
+            destroyEsp(player)
+        end
+    end
+end))
+
+table.insert(connections, Players.PlayerRemoving:Connect(destroyEsp))
+
+-- INITIALIZATION
+task.spawn(function()
+    while task.wait(3) do
+        pcall(scanForGuns)
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
+    end
+    isJumping = false
+    setupMovement()
+end)
+
+movementConnection = RunService.RenderStepped:Connect(function()
+    pcall(updateMovement)
+end)
+table.insert(connections, movementConnection)
+
+task.wait(0.5)
+setupMovement()
+scanForGuns()
+
+print("[JAILBREAK ME] Loaded Successfully!")
+print("  🔓 ESP + Movement Bypass + Gun Mods")
+print("  🔓 Inf Nitrous: Click button then press Q")
+print("  🔓 HyperShift: Click button to activate")
+print("  🔓 Press Right Shift to hide/show menu")
