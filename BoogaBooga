@@ -3023,6 +3023,18 @@ function formatShortTime(seconds)
 	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
+function roundDropEstimateSeconds(seconds)
+	seconds = math.max(0, seconds or 0)
+	if seconds >= 600 then
+		return math.floor(seconds / 15 + 0.5) * 15
+	elseif seconds >= 120 then
+		return math.floor(seconds / 10 + 0.5) * 10
+	elseif seconds >= 30 then
+		return math.floor(seconds / 5 + 0.5) * 5
+	end
+	return math.floor(seconds + 0.5)
+end
+
 function autoDropToggleLabel()
 	return autoHeal.DropEstimateLabel ~= "" and ("Auto Drop - " .. autoHeal.DropEstimateLabel) or "Auto Drop"
 end
@@ -3092,7 +3104,10 @@ function updateAutoDropEstimate(remaining)
 	autoHeal.DropEstimateRate = lost / elapsed
 	local seconds = remaining / math.max(autoHeal.DropEstimateRate, 0.001)
 	autoHeal.DropEstimateSeconds = seconds
-	local label = formatShortTime(seconds)
+	if now - autoHeal.DropEstimateDisplayTime < 1 and autoHeal.DropEstimateLabel ~= "" and autoHeal.DropEstimateLabel ~= "..." then
+		return
+	end
+	local label = formatShortTime(roundDropEstimateSeconds(seconds))
 	if label ~= autoHeal.DropEstimateLabel then
 		autoHeal.DropEstimateLabel = label
 		autoHeal.DropEstimateDisplayTime = now
@@ -4567,8 +4582,8 @@ local flyVelocity
 local flyGyro
 local flyCurrentVelocity = Vector3.zero
 local flyBobTime = 0
-local flyIdleAnimationIds = { 507785072, 616111295, 507770239, 507766388 }
-local flyMoveAnimationIds = { 507784897, 507767968, 616111295 }
+local flyIdleAnimationIds = {}
+local flyMoveAnimationIds = {}
 local noclipOriginals = {}
 local noclipCollisionGroups = {}
 local noclipTerrainGroup
@@ -4635,15 +4650,15 @@ function setFlyPose(enabled, moving)
 		end
 		return
 	end
-	local reach = moving and -118 or -92
+	local reach = moving and -150 or -112
 	if rightShoulder and rightShoulder:IsA("Motor6D") then
-		rightShoulder.Transform = CFrame.Angles(math.rad(reach), math.rad(6), math.rad(18))
+		rightShoulder.Transform = CFrame.Angles(math.rad(reach), math.rad(0), math.rad(24))
 	end
 	if leftShoulder and leftShoulder:IsA("Motor6D") then
-		leftShoulder.Transform = CFrame.Angles(math.rad(reach + 10), math.rad(-8), math.rad(-18))
+		leftShoulder.Transform = CFrame.Angles(math.rad(reach + 4), math.rad(0), math.rad(-24))
 	end
 	if waist and waist:IsA("Motor6D") then
-		waist.Transform = moving and CFrame.Angles(math.rad(-8), 0, 0) or CFrame.new()
+		waist.Transform = moving and CFrame.Angles(math.rad(-14), 0, 0) or CFrame.Angles(math.rad(-4), 0, 0)
 	end
 end
 
@@ -4659,27 +4674,8 @@ function stopFlyAnimation()
 end
 
 function startFlyAnimation(moving)
-	local _, hum = getCharacterParts()
-	local wantedMode = moving and "Move" or "Idle"
-	if not hum or (autoHeal.FlyTrack and autoHeal.FlyMode == wantedMode) then
-		return
-	end
 	stopFlyAnimation()
-	for _, animationId in ipairs(moving and flyMoveAnimationIds or flyIdleAnimationIds) do
-		local animation = Instance.new("Animation")
-		animation.AnimationId = "rbxassetid://" .. tostring(animationId)
-		local ok, track = pcall(function()
-			return hum:LoadAnimation(animation)
-		end)
-		if ok and track then
-			autoHeal.FlyTrack = track
-			autoHeal.FlyMode = wantedMode
-			track.Looped = true
-			track.Priority = Enum.AnimationPriority.Action
-			track:Play(0.18, 1, 1)
-			return
-		end
-	end
+	autoHeal.FlyMode = moving and "Move" or "Idle"
 end
 
 function startFly()
@@ -4996,8 +4992,8 @@ function updateFly(dt)
 	if flatRight.Magnitude > 0 then
 		flatRight = flatRight.Unit
 	end
-	if movementKeys.Forward or state.AutoRun then move += flatLook end
-	if movementKeys.Back then move -= flatLook end
+	if movementKeys.Forward or state.AutoRun then move += look end
+	if movementKeys.Back then move -= look end
 	if movementKeys.Right then move += flatRight end
 	if movementKeys.Left then move -= flatRight end
 	if movementKeys.Up then move += Vector3.yAxis end
@@ -5011,17 +5007,14 @@ function updateFly(dt)
 		flyBobTime = 0
 	else
 		flyBobTime += dt
-		targetVelocity = Vector3.new(0, math.sin(flyBobTime * 2.1) * 0.9, 0)
-		local alpha = math.clamp(dt * 5, 0, 1)
-		flyCurrentVelocity = flyCurrentVelocity:Lerp(targetVelocity, alpha)
+		targetVelocity = Vector3.new(0, math.sin(flyBobTime * 2.1) * 0.85, 0)
+		flyCurrentVelocity = Vector3.new(0, targetVelocity.Y, 0)
+		root.AssemblyLinearVelocity = Vector3.new(0, targetVelocity.Y, 0)
 		root.AssemblyAngularVelocity = Vector3.zero
 	end
 
-	if not moving and math.abs(flyCurrentVelocity.Y) < 0.05 then
-		flyCurrentVelocity = Vector3.new(0, flyCurrentVelocity.Y, 0)
-	end
 	flyVelocity.Velocity = flyCurrentVelocity
-	if not autoHeal.FlyTrack or not autoHeal.FlyTrack.IsPlaying or autoHeal.FlyMode ~= (moving and "Move" or "Idle") then
+	if autoHeal.FlyMode ~= (moving and "Move" or "Idle") then
 		startFlyAnimation(moving)
 	end
 
@@ -6716,7 +6709,7 @@ function collectInventoryNames()
 	local names = {}
 	if loadAutoHealModules() and autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory then
 		for _, item in pairs(autoHeal.GameUtil.Data.inventory) do
-			if item and item.name and dropItemQuantity(item) > 0 and item.name ~= "Pleb Chest" and item.name ~= "Rock" then
+			if item and item.name and dropItemQuantity(item) > 0 and item.name ~= "Rock" and not string.find(item.name, "Chest", 1, true) then
 				names[item.name] = true
 				if selections.AutoDrop[item.name] == nil then
 					selections.AutoDrop[item.name] = isDefaultAutoDropItem(item.name)
