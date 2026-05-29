@@ -7,7 +7,6 @@ local supported = {
     [2317712696] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/WildWestMe'))()", -- WildWest
     [11879754496] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BoogaBooga'))()", -- VoidWorld Booga
     [606849621] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BreakJail'))()",    -- Jail Break
-    [122446657157717] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/Sniper%20Arena'))()", -- Sniper Arena
     
     -- By Game ID (Universe ID)
     [9534705677] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/Sniper%20Arena'))()", -- Sniper Arena
