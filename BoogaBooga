@@ -2529,18 +2529,6 @@ function animatePickupPart(part)
 	end)
 end
 
-function pickupEncode(entityID)
-	return string.pack("<BBI3x", 0x01, 0xE7, entityID)
-end
-
-function getPickupByteNet()
-	if autoHeal.PickupByteNet and autoHeal.PickupByteNet.Parent then
-		return autoHeal.PickupByteNet
-	end
-	autoHeal.PickupByteNet = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
-	return autoHeal.PickupByteNet
-end
-
 function sendPickupPacket(entityID)
 	local now = os.clock()
 	local lastSent = autoHeal.PickupSent[entityID]
@@ -2548,20 +2536,17 @@ function sendPickupPacket(entityID)
 		return false
 	end
 	autoHeal.PickupSent[entityID] = now
-	local remote = getPickupByteNet()
-	if remote then
-		local ok = pcall(function()
-			remote:FireServer(buffer.fromstring(pickupEncode(entityID)))
+	
+	-- Use the working Packets.Pickup.send method
+	if loadPickupModules() and autoHeal.PickupRemote then
+		local success, err = pcall(function()
+			autoHeal.PickupRemote.send(entityID)
 		end)
-		if ok then
+		if success then
 			return true
 		end
 	end
-	if loadPickupModules() and autoHeal.PickupRemote then
-		return pcall(function()
-			autoHeal.PickupRemote.send(entityID)
-		end)
-	end
+	
 	return false
 end
 
