@@ -452,6 +452,8 @@ local autoHeal = {
 	FarmTweenLoop = false,
 	TweenFollowTween = nil,
 	TweenFollowLoop = false,
+	TweenFollowLastMove = 0,
+	TweenFollowLastGoal = nil,
 	DropTimer = 0,
 	DropIndex = 1,
 	DropEstimateLastRemaining = nil,
@@ -3394,21 +3396,25 @@ function updateAutoFarm(dt)
 end
 
 function collectTweenFollowPlayers()
-	local names = {}
+	local names = { "None" }
 	for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
 		if targetPlayer ~= player then
 			table.insert(names, targetPlayer.Name)
 		end
 	end
-	table.sort(names)
-	if state.TweenFollowPlayer == "" and #names > 0 then
-		state.TweenFollowPlayer = names[1]
-	end
+	table.sort(names, function(a, b)
+		if a == "None" then
+			return true
+		elseif b == "None" then
+			return false
+		end
+		return a < b
+	end)
 	return names
 end
 
 function tweenFollowTargetRoot()
-	if state.TweenFollowPlayer == "" then
+	if state.TweenFollowPlayer == "" or state.TweenFollowPlayer == "None" then
 		return nil
 	end
 	local playersFolder = workspace:FindFirstChild("Players")
@@ -3442,6 +3448,10 @@ function tweenFollowTo(root, targetRoot)
 		hum:Move(Vector3.zero, false)
 		return
 	end
+	local now = os.clock()
+	if autoHeal.TweenFollowLastGoal and (targetPosition - autoHeal.TweenFollowLastGoal).Magnitude < 2.5 and now - autoHeal.TweenFollowLastMove < 0.45 then
+		return
+	end
 	if autoHeal.TweenFollowTween then
 		pcall(function()
 			autoHeal.TweenFollowTween:Cancel()
@@ -3449,9 +3459,16 @@ function tweenFollowTo(root, targetRoot)
 		autoHeal.TweenFollowTween = nil
 	end
 	hum:MoveTo(targetPosition)
+	autoHeal.TweenFollowLastGoal = targetPosition
+	autoHeal.TweenFollowLastMove = now
 end
 
 function startTweenFollowLoop()
+	if state.TweenFollowPlayer == "" or state.TweenFollowPlayer == "None" then
+		state.TweenFollow = false
+		notify("Tween Follow", "Pick a player first.")
+		return
+	end
 	if autoHeal.TweenFollowLoop then
 		return
 	end
@@ -3462,12 +3479,12 @@ function startTweenFollowLoop()
 			local targetRoot = tweenFollowTargetRoot()
 			if hum and hum.Health > 0 and root and targetRoot then
 				tweenFollowTo(root, targetRoot)
-			elseif state.TweenFollowPlayer ~= "" then
+			elseif state.TweenFollowPlayer ~= "" and state.TweenFollowPlayer ~= "None" then
 				notify("Tween Follow", "Selected player not found.")
 				state.TweenFollow = false
 				break
 			end
-			task.wait(0.12)
+			task.wait(0.22)
 		end
 		autoHeal.TweenFollowLoop = false
 	end)
@@ -3476,6 +3493,8 @@ end
 function stopTweenFollow()
 	state.TweenFollow = false
 	autoHeal.TweenFollowLoop = false
+	autoHeal.TweenFollowLastMove = 0
+	autoHeal.TweenFollowLastGoal = nil
 	if autoHeal.TweenFollowTween then
 		pcall(function()
 			autoHeal.TweenFollowTween:Cancel()
@@ -4581,8 +4600,30 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		PaddingBottom = UDim.new(0, 6),
 	}, overlay)
 
+	local searchBox = make("TextBox", {
+		Name = "Search",
+		Size = UDim2.new(1, 0, 0, 28),
+		BackgroundColor3 = Color3.fromRGB(20, 20, 23),
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = "Search...",
+		PlaceholderColor3 = Color3.fromRGB(150, 150, 155),
+		Text = "",
+		TextColor3 = Color3.fromRGB(245, 245, 245),
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 81,
+	}, overlay)
+	corner(searchBox, 6)
+	make("UIPadding", {
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+	}, searchBox)
+
 	local options = make("ScrollingFrame", {
-		Size = UDim2.fromScale(1, 1),
+		Position = UDim2.new(0, 0, 0, 34),
+		Size = UDim2.new(1, 0, 1, -34),
 		CanvasSize = UDim2.new(0, 0, 0, 0),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
@@ -4599,6 +4640,13 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 	local expanded = false
 	local rows = {}
 	local closeDropdown
+
+	local function applyChoiceSearch()
+		local query = string.lower(searchBox.Text)
+		for choice, row in pairs(rows) do
+			row.Visible = query == "" or string.find(string.lower(choice), query, 1, true) ~= nil
+		end
+	end
 
 	local function rebuildRows()
 		for _, row in pairs(rows) do
@@ -4630,6 +4678,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 				closeDropdown()
 			end)
 		end
+		applyChoiceSearch()
 	end
 
 	local function redraw()
@@ -4649,6 +4698,8 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 		end
 		expanded = false
 		overlay.Visible = false
+		searchBox.Text = ""
+		searchBox:ReleaseFocus()
 		redraw()
 	end
 	table.insert(dropdownClosers, closeDropdown)
@@ -4663,10 +4714,13 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 			openDropdowns += 1
 			dropdownBlocker.Visible = true
 			syncPageScrolling()
-			positionDropdownOverlay(overlay, headerButton, math.min(#currentChoices() * 30 + 12, 220))
+			positionDropdownOverlay(overlay, headerButton, math.min(#currentChoices() * 30 + 46, 250))
+			searchBox:CaptureFocus()
 		end
 		redraw()
 	end)
+
+	connect(searchBox:GetPropertyChangedSignal("Text"), applyChoiceSearch)
 
 	rebuildRows()
 	redraw()
@@ -5555,7 +5609,15 @@ function getPlayerToolInfo(targetPlayer)
 	return nil
 end
 
-function ensurePlayerEsp(targetPlayer)
+function isTweenFollowTarget(targetPlayer)
+	return state.TweenFollow
+		and state.TweenFollowPlayer ~= ""
+		and state.TweenFollowPlayer ~= "None"
+		and targetPlayer
+		and targetPlayer.Name == state.TweenFollowPlayer
+end
+
+function ensurePlayerEsp(targetPlayer, refreshLabel)
 	if targetPlayer == player then
 		return
 	end
@@ -5568,8 +5630,10 @@ function ensurePlayerEsp(targetPlayer)
 
 	local obj = esp.Players[targetPlayer]
 	local baseColor = targetPlayer.TeamColor and targetPlayer.TeamColor.Color or Color3.fromRGB(120, 180, 255)
-	local teamColor = state.PlayerZayMode and Color3.fromHSV((os.clock() * 0.18) % 1, 0.9, 1) or baseColor
+	local isTarget = isTweenFollowTarget(targetPlayer)
+	local teamColor = (state.PlayerZayMode or isTarget) and Color3.fromHSV((os.clock() * 0.18) % 1, 0.9, 1) or baseColor
 	if not obj then
+		refreshLabel = true
 		local billboard, text, subText = createBillboard(targetPlayer.Name, teamColor, state.PlayerTextSize, true)
 		local highlight = createHighlight(teamColor)
 		local tracer = createTracer(teamColor)
@@ -5601,29 +5665,31 @@ function ensurePlayerEsp(targetPlayer)
 	obj.Highlight.OutlineColor = teamColor
 	obj.Tracer.BackgroundColor3 = teamColor
 
-	local health
-	local workspacePlayers = workspace:FindFirstChild("Players")
-	local workspacePlayer = workspacePlayers and workspacePlayers:FindFirstChild(targetPlayer.Name)
-	local workspaceHumanoid = workspacePlayer and workspacePlayer:FindFirstChild("Humanoid")
-	if workspaceHumanoid then
-		health = readNumberValue(workspaceHumanoid:FindFirstChild("Health")) or readNumberValue(workspaceHumanoid)
-	end
-	health = health or readNumberValue(targetCharacter:FindFirstChildOfClass("Humanoid"))
+	if refreshLabel then
+		local health
+		local workspacePlayers = workspace:FindFirstChild("Players")
+		local workspacePlayer = workspacePlayers and workspacePlayers:FindFirstChild(targetPlayer.Name)
+		local workspaceHumanoid = workspacePlayer and workspacePlayer:FindFirstChild("Humanoid")
+		if workspaceHumanoid then
+			health = readNumberValue(workspaceHumanoid:FindFirstChild("Health")) or readNumberValue(workspaceHumanoid)
+		end
+		health = health or readNumberValue(targetCharacter:FindFirstChildOfClass("Humanoid"))
 
-	local text = targetPlayer.Name
-	if health then
-		text ..= string.format(" [%d HP]", math.floor(health + 0.5))
-	end
-	if state.PlayerDistance then
-		text ..= string.format(" [%dm]", distanceFromLocal(adornee))
-	end
-	obj.Text.Text = text
-	if obj.ToolText then
-		local toolName, toolColor = getPlayerToolInfo(targetPlayer)
-		obj.ToolText.Text = toolName or ""
-		obj.ToolText.TextColor3 = itemTextColor(toolName, toolColor)
-		obj.ToolText.TextSize = math.max(10, state.PlayerTextSize - 2)
-		obj.ToolText.Visible = state.PlayerTools and toolName ~= nil
+		local text = targetPlayer.Name
+		if health then
+			text ..= string.format(" [%d HP]", math.floor(health + 0.5))
+		end
+		if state.PlayerDistance then
+			text ..= string.format(" [%dm]", distanceFromLocal(adornee))
+		end
+		obj.Text.Text = text
+		if obj.ToolText then
+			local toolName, toolColor = getPlayerToolInfo(targetPlayer)
+			obj.ToolText.Text = toolName or ""
+			obj.ToolText.TextColor3 = itemTextColor(toolName, toolColor)
+			obj.ToolText.TextSize = math.max(10, state.PlayerTextSize - 2)
+			obj.ToolText.Visible = state.PlayerTools and toolName ~= nil
+		end
 	end
 
 	drawTracer(obj.Tracer, adornee.Position, state.PlayerEsp and state.PlayerTracers)
@@ -6218,6 +6284,26 @@ function matchesWorldRule(instance, ruleName)
 		or hasKeyword(instance, rule.keywords)
 end
 
+function anyWorldEspEnabled()
+	return state.GodEsp
+		or state.PortalEsp
+		or state.AntHillEsp
+		or state.TotemEsp
+		or state.EventEsp
+		or state.OreEsp
+		or state.MobEsp
+		or state.EntityEsp
+		or state.DroppedEsp
+end
+
+function refreshWorldCandidates()
+	table.clear(esp.Candidates)
+	for _, descendant in ipairs(workspace:GetDescendants()) do
+		trackWorldCandidate(descendant)
+	end
+	autoHeal.WorldCandidatesScanned = true
+end
+
 function getWorldCandidates()
 	local candidates = {}
 
@@ -6391,6 +6477,7 @@ perf = {
 	HealthTimer = 0,
 	BloodFruitTimer = 0,
 	PlayerEspTimer = 0,
+	PlayerEspLabelTimer = 2,
 	WorldTracerTimer = 0,
 }
 local worldScanTimer = 0
@@ -6906,18 +6993,43 @@ function ensureConfigFolder()
 	end
 end
 
+function findLegacyAutoLoadConfigName(configs)
+	for _, configName in ipairs(type(configs) == "table" and configs or {}) do
+		local cleanName = cleanConfigName(configName)
+		local path = configPath(cleanName)
+		if isfile(path) then
+			local ok, data = pcall(function()
+				return S.HttpService:JSONDecode(readfile(path))
+			end)
+			if ok and type(data) == "table" and type(data.State) == "table" and data.State.AutoLoadConfig == true then
+				return cleanName
+			end
+		end
+	end
+	return nil
+end
+
 function readConfigIndex()
 	if not canUseConfigFiles() or not isfile(configIndexPath()) then
-		return { Configs = {}, SelectedConfig = state.SelectedConfig, AutoLoadConfig = state.AutoLoadConfig }
+		return { Configs = {}, SelectedConfig = state.SelectedConfig, AutoLoadConfig = false, AutoLoadConfigName = nil }
 	end
 	local ok, data = pcall(function()
 		return S.HttpService:JSONDecode(readfile(configIndexPath()))
 	end)
 	if ok and type(data) == "table" then
 		data.Configs = type(data.Configs) == "table" and data.Configs or {}
+		data.SelectedConfig = cleanConfigName(data.SelectedConfig or state.SelectedConfig)
+		local legacyAutoLoadName = data.AutoLoadIndexVersion ~= 2 and findLegacyAutoLoadConfigName(data.Configs) or nil
+		if data.AutoLoadConfig == true or legacyAutoLoadName then
+			data.AutoLoadConfig = true
+			data.AutoLoadConfigName = cleanConfigName(data.AutoLoadConfigName or legacyAutoLoadName or data.SelectedConfig)
+		else
+			data.AutoLoadConfig = false
+			data.AutoLoadConfigName = nil
+		end
 		return data
 	end
-	return { Configs = {}, SelectedConfig = state.SelectedConfig, AutoLoadConfig = state.AutoLoadConfig }
+	return { Configs = {}, SelectedConfig = state.SelectedConfig, AutoLoadConfig = false, AutoLoadConfigName = nil }
 end
 
 function writeConfigIndex(index)
@@ -6925,8 +7037,16 @@ function writeConfigIndex(index)
 		return false
 	end
 	ensureConfigFolder()
+	index = type(index) == "table" and index or readConfigIndex()
+	index.Configs = type(index.Configs) == "table" and index.Configs or {}
 	index.SelectedConfig = state.SelectedConfig
-	index.AutoLoadConfig = state.AutoLoadConfig
+	if index.AutoLoadConfig == true then
+		index.AutoLoadConfigName = cleanConfigName(index.AutoLoadConfigName or state.SelectedConfig)
+	else
+		index.AutoLoadConfig = false
+		index.AutoLoadConfigName = nil
+	end
+	index.AutoLoadIndexVersion = 2
 	local ok, encoded = pcall(function()
 		return S.HttpService:JSONEncode(index)
 	end)
@@ -6936,6 +7056,40 @@ function writeConfigIndex(index)
 	return pcall(function()
 		writefile(configIndexPath(), encoded)
 	end)
+end
+
+function autoLoadNameFromIndex(index)
+	index = index or readConfigIndex()
+	if index.AutoLoadConfig ~= true then
+		return nil
+	end
+	return cleanConfigName(index.AutoLoadConfigName or index.SelectedConfig or state.SelectedConfig)
+end
+
+function selectedConfigIsAutoLoad(index)
+	local autoName = autoLoadNameFromIndex(index)
+	return autoName ~= nil and cleanConfigName(state.SelectedConfig) == autoName
+end
+
+function syncSelectedAutoLoadState(index)
+	state.AutoLoadConfig = selectedConfigIsAutoLoad(index)
+end
+
+function setAutoLoadTarget(enabled, name)
+	local index = readConfigIndex()
+	if enabled then
+		local cleanName = cleanConfigName(name or state.SelectedConfig)
+		index.AutoLoadConfig = true
+		index.AutoLoadConfigName = cleanName
+		state.SelectedConfig = cleanName
+		state.ConfigName = cleanName
+		state.AutoLoadConfig = true
+	else
+		index.AutoLoadConfig = false
+		index.AutoLoadConfigName = nil
+		state.AutoLoadConfig = false
+	end
+	writeConfigIndex(index)
 end
 
 function addConfigToIndex(name)
@@ -6951,6 +7105,7 @@ function addConfigToIndex(name)
 	end
 	state.SelectedConfig = cleanName
 	state.ConfigName = cleanName
+	syncSelectedAutoLoadState(index)
 	writeConfigIndex(index)
 end
 
@@ -6984,7 +7139,8 @@ function buildConfigData()
 	local stateData = {}
 	for key, value in pairs(state) do
 		local valueType = typeof(value)
-		if valueType == "boolean" or valueType == "number" or valueType == "string" or valueType == "EnumItem" then
+		if key ~= "AutoLoadConfig" and key ~= "SelectedConfig" and key ~= "ConfigName"
+			and (valueType == "boolean" or valueType == "number" or valueType == "string" or valueType == "EnumItem") then
 			stateData[key] = encodeConfigValue(value)
 		end
 	end
@@ -7007,7 +7163,7 @@ function applyConfigData(data)
 	end
 	if type(data.State) == "table" then
 		for key, value in pairs(data.State) do
-			if state[key] ~= nil and key ~= "SelectedConfig" and key ~= "ConfigName" and not lockedConfigStateKey(key) then
+			if state[key] ~= nil and key ~= "SelectedConfig" and key ~= "ConfigName" and key ~= "AutoLoadConfig" and not lockedConfigStateKey(key) then
 				state[key] = decodeConfigValue(value)
 			end
 		end
@@ -7031,6 +7187,7 @@ function applyConfigData(data)
 	end
 	if autoPickupToggleRedraw then autoPickupToggleRedraw() end
 	if freecamToggleRedraw then freecamToggleRedraw() end
+	if autoLoadToggleRedraw then autoLoadToggleRedraw() end
 	return true
 end
 
@@ -7087,9 +7244,10 @@ function loadConfig(silent, name)
 		return S.HttpService:JSONDecode(readfile(configPath(name)))
 	end)
 	if ok and applyConfigData(data) then
+		local index = readConfigIndex()
 		state.SelectedConfig = name
 		state.ConfigName = name
-		local index = readConfigIndex()
+		syncSelectedAutoLoadState(index)
 		writeConfigIndex(index)
 		if not silent then notify("Config", "Config Loaded (" .. name .. ")") end
 		return true
@@ -7118,8 +7276,13 @@ function deleteConfig()
 			table.remove(index.Configs, i)
 		end
 	end
+	if autoLoadNameFromIndex(index) == name then
+		index.AutoLoadConfig = false
+		index.AutoLoadConfigName = nil
+	end
 	state.SelectedConfig = index.Configs[1] or "Default"
 	state.ConfigName = state.SelectedConfig
+	syncSelectedAutoLoadState(index)
 	writeConfigIndex(index)
 	notify("Config", "Config Deleted (" .. name .. ")")
 end
@@ -7129,13 +7292,17 @@ function autoLoadSavedConfig()
 		return
 	end
 	local index = readConfigIndex()
-	state.AutoLoadConfig = index.AutoLoadConfig == true
+	local autoName = autoLoadNameFromIndex(index)
 	state.SelectedConfig = cleanConfigName(index.SelectedConfig or state.SelectedConfig)
 	state.ConfigName = state.SelectedConfig
-	if state.AutoLoadConfig and isfile(configPath(state.SelectedConfig)) then
-		loadConfig(true, state.SelectedConfig)
+	syncSelectedAutoLoadState(index)
+	if autoName and isfile(configPath(autoName)) then
+		loadConfig(true, autoName)
+		state.SelectedConfig = autoName
+		state.ConfigName = autoName
+		state.AutoLoadConfig = true
 		task.defer(function()
-			notify("Config", "Auto Loaded (" .. state.SelectedConfig .. ")")
+			notify("Config", "Auto Loaded (" .. autoName .. ")")
 		end)
 	end
 end
@@ -7196,18 +7363,17 @@ sections.TweenFollow = section(playerPage, "Tween Follow")
 createChoiceDropdown(sections.TweenFollow, "Follow Player", collectTweenFollowPlayers, function()
 	return state.TweenFollowPlayer ~= "" and state.TweenFollowPlayer or "None"
 end, function(value)
-	state.TweenFollowPlayer = value
+	state.TweenFollowPlayer = value == "None" and "" or value
+	if state.TweenFollow and state.TweenFollowPlayer == "" then
+		stopTweenFollow()
+	end
 end)
 createToggle(sections.TweenFollow, "Tween Follow", function() return state.TweenFollow end, function(v)
 	state.TweenFollow = v
 	if v then
-		if state.TweenFollowPlayer == "" then
-			local names = collectTweenFollowPlayers()
-			state.TweenFollowPlayer = names[1] or ""
-		end
-		if state.TweenFollowPlayer == "" then
+		if state.TweenFollowPlayer == "" or state.TweenFollowPlayer == "None" then
 			state.TweenFollow = false
-			notify("Tween Follow", "No players found.")
+			notify("Tween Follow", "Pick a player first.")
 			return
 		end
 		notify("Tween Follow", "Following " .. state.TweenFollowPlayer)
@@ -7471,14 +7637,20 @@ end)
 configDropdownRedraw = createChoiceDropdown(sections.Config, "Selected Config", collectConfigNames, function()
 	return state.SelectedConfig
 end, function(value)
+	local index = readConfigIndex()
 	state.SelectedConfig = cleanConfigName(value)
 	state.ConfigName = state.SelectedConfig
-	writeConfigIndex(readConfigIndex())
+	syncSelectedAutoLoadState(index)
+	writeConfigIndex(index)
+	if autoLoadToggleRedraw then
+		autoLoadToggleRedraw()
+	end
 end)
-createToggle(sections.Config, "Auto Load Config", function() return state.AutoLoadConfig end, function(v)
-	state.AutoLoadConfig = v
-	writeConfigIndex(readConfigIndex())
-	notify("Config", v and "Auto Load Config On" or "Auto Load Config Off")
+autoLoadToggleRedraw = createToggle(sections.Config, "Auto Load Config", function()
+	return selectedConfigIsAutoLoad()
+end, function(v)
+	setAutoLoadTarget(v, state.SelectedConfig)
+	notify("Config", v and ("Auto Load Config On (" .. state.SelectedConfig .. ")") or "Auto Load Config Off")
 end)
 createActionButton(sections.Config, "Load Config", function()
 	loadConfig(false)
@@ -7907,15 +8079,21 @@ connect(S.RunService.RenderStepped, function(dt)
 		end
 	end
 
+	perf.PlayerEspLabelTimer += dt
 	perf.PlayerEspTimer += dt
 	if perf.PlayerEspTimer >= (state.PlayerTracers and 0.05 or 0.2) then
 		perf.PlayerEspTimer = 0
 		if state.PlayerEsp then
-			for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
-				ensurePlayerEsp(targetPlayer)
+			local refreshLabels = perf.PlayerEspLabelTimer >= 2
+			if refreshLabels then
+				perf.PlayerEspLabelTimer = 0
 			end
-		else
+			for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+				ensurePlayerEsp(targetPlayer, refreshLabels)
+			end
+		elseif next(esp.Players) then
 			clearEsp(esp.Players)
+			perf.PlayerEspLabelTimer = 2
 		end
 	end
 
@@ -7968,8 +8146,6 @@ connect(S.RunService.RenderStepped, function(dt)
 			end
 		end
 	end
-	syncFreecamEspLabels()
-
 	worldLabelTimer += dt
 	local labelDelay = state.WorldLabelRefreshTime
 	if state.PerformanceGuard and perf.AverageFps > 0 and perf.AverageFps < 45 then
