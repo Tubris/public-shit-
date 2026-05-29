@@ -1,11 +1,16 @@
 local placeId = game.PlaceId
+local gameId = game.GameId
 
 local supported = {
+    -- By Place ID
     [11729688377] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BoogaBooga'))()", -- Booga Booga
     [2317712696] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/WildWestMe'))()", -- WildWest
     [11879754496] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BoogaBooga'))()", -- VoidWorld Booga
     [606849621] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/BreakJail'))()",    -- Jail Break
-    [119259569670784] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/Sniper%20Arena'))()", -- Sniper Arena
+    [122446657157717] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/Sniper%20Arena'))()", -- Sniper Arena
+    
+    -- By Game ID (Universe ID)
+    [9534705677] = "loadstring(game:HttpGet('https://raw.githubusercontent.com/Tubris/public-shit-/refs/heads/main/Sniper%20Arena'))()", -- Sniper Arena
 }
 
 local discordInviteCode = "SatFXKfdHa"
@@ -25,8 +30,11 @@ local function copyToClipboard(text)
     end
 end
 
-if supported[placeId] then
-    loadstring(supported[placeId])()
+-- Check both Place ID and Game ID
+local scriptToLoad = supported[placeId] or supported[gameId]
+
+if scriptToLoad then
+    loadstring(scriptToLoad)()
 else
     local player = game.Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
@@ -37,8 +45,8 @@ else
     screenGui.Parent = playerGui
 
     local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0, 460, 0, 250)
-    mainFrame.Position = UDim2.new(0.5, -230, 0.5, -125)
+    mainFrame.Size = UDim2.new(0, 460, 0, 280)
+    mainFrame.Position = UDim2.new(0.5, -230, 0.5, -140)
     mainFrame.BackgroundColor3 = Color3.fromRGB(25, 8, 40)
     mainFrame.BorderSizePixel = 0
     mainFrame.ClipsDescendants = true
@@ -88,9 +96,21 @@ else
     message.TextXAlignment = Enum.TextXAlignment.Center
     message.Parent = mainFrame
 
+    -- Display current IDs for debugging
+    local debugLabel = Instance.new("TextLabel")
+    debugLabel.Size = UDim2.new(1, -40, 0, 30)
+    debugLabel.Position = UDim2.new(0, 20, 0, 140)
+    debugLabel.Text = "Place ID: " .. placeId .. " | Game ID: " .. gameId
+    debugLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    debugLabel.BackgroundTransparency = 1
+    debugLabel.Font = Enum.Font.SourceSans
+    debugLabel.TextSize = 11
+    debugLabel.TextXAlignment = Enum.TextXAlignment.Center
+    debugLabel.Parent = mainFrame
+
     local discordButton = Instance.new("TextButton")
     discordButton.Size = UDim2.new(0, 280, 0, 48)
-    discordButton.Position = UDim2.new(0.5, -140, 0, 155)
+    discordButton.Position = UDim2.new(0.5, -140, 0, 180)
     discordButton.Text = "📋 JOIN DISCORD"
     discordButton.TextColor3 = Color3.new(1, 1, 1)
     discordButton.BackgroundColor3 = Color3.fromRGB(35, 170, 70)
@@ -105,7 +125,7 @@ else
 
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(1, -40, 0, 30)
-    statusLabel.Position = UDim2.new(0, 20, 0, 215)
+    statusLabel.Position = UDim2.new(0, 20, 0, 240)
     statusLabel.Text = ""
     statusLabel.TextColor3 = Color3.new(0.6, 1, 0.6)
     statusLabel.BackgroundTransparency = 1
