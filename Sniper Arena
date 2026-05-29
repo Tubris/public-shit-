@@ -1,0 +1,1091 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = CoreGui
+ScreenGui.Name = "AimMeSniperMe"
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 540)
+MainFrame.Position = UDim2.new(0, 100, 0, 100)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 10, 35)
+MainFrame.BackgroundTransparency = 0.1
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(138, 43, 226)
+UIStroke.Thickness = 1
+UIStroke.Transparency = 0.3
+UIStroke.Parent = MainFrame
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(0, 260, 0, 35)
+TitleBar.Position = UDim2.new(0, 0, 0, 0)
+TitleBar.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+TitleBar.BackgroundTransparency = 0.15
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, 0, 1, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "AIM ME SNIPER ME"
+TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleText.TextSize = 16
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextXAlignment = Enum.TextXAlignment.Center
+TitleText.Parent = TitleBar
+
+local dragging = false
+local dragStart, startPos
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+TitleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local ContentFrame = Instance.new("ScrollingFrame")
+ContentFrame.Size = UDim2.new(0, 240, 0, 490)
+ContentFrame.Position = UDim2.new(0, 10, 0, 45)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ContentFrame.ScrollBarThickness = 4
+ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(138, 43, 226)
+ContentFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Padding = UDim.new(0, 8)
+UIListLayout.Parent = ContentFrame
+
+local DropdownLabel = Instance.new("TextLabel")
+DropdownLabel.Size = UDim2.new(0, 220, 0, 18)
+DropdownLabel.BackgroundTransparency = 1
+DropdownLabel.Text = "HITPART TARGET"
+DropdownLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+DropdownLabel.TextSize = 11
+DropdownLabel.Font = Enum.Font.Gotham
+DropdownLabel.TextXAlignment = Enum.TextXAlignment.Left
+DropdownLabel.Parent = ContentFrame
+
+local Dropdown = Instance.new("TextButton")
+Dropdown.Size = UDim2.new(0, 220, 0, 32)
+Dropdown.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+Dropdown.BackgroundTransparency = 0.2
+Dropdown.Text = "Body"
+Dropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
+Dropdown.TextSize = 13
+Dropdown.Font = Enum.Font.Gotham
+Dropdown.BorderSizePixel = 0
+Dropdown.Parent = ContentFrame
+
+local DropdownCorner = Instance.new("UICorner")
+DropdownCorner.CornerRadius = UDim.new(0, 6)
+DropdownCorner.Parent = Dropdown
+
+local ESPToggle = Instance.new("TextButton")
+ESPToggle.Size = UDim2.new(0, 220, 0, 35)
+ESPToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+ESPToggle.BackgroundTransparency = 0.2
+ESPToggle.Text = "ESP WALLHACK: OFF"
+ESPToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+ESPToggle.TextSize = 13
+ESPToggle.Font = Enum.Font.Gotham
+ESPToggle.BorderSizePixel = 0
+ESPToggle.Parent = ContentFrame
+
+local ESPCorner = Instance.new("UICorner")
+ESPCorner.CornerRadius = UDim.new(0, 6)
+ESPCorner.Parent = ESPToggle
+
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Size = UDim2.new(0, 220, 0, 18)
+SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.Text = "WALKSPEED"
+SpeedLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+SpeedLabel.TextSize = 11
+SpeedLabel.Font = Enum.Font.Gotham
+SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+SpeedLabel.Parent = ContentFrame
+
+local SpeedValueDisplay = Instance.new("TextLabel")
+SpeedValueDisplay.Size = UDim2.new(0, 50, 0, 18)
+SpeedValueDisplay.Position = UDim2.new(0, 170, 0, 0)
+SpeedValueDisplay.BackgroundTransparency = 1
+SpeedValueDisplay.Text = "16"
+SpeedValueDisplay.TextColor3 = Color3.fromRGB(138, 43, 226)
+SpeedValueDisplay.TextSize = 13
+SpeedValueDisplay.Font = Enum.Font.GothamBold
+SpeedValueDisplay.TextXAlignment = Enum.TextXAlignment.Right
+SpeedValueDisplay.Parent = SpeedLabel
+
+local SpeedToggle = Instance.new("TextButton")
+SpeedToggle.Size = UDim2.new(0, 220, 0, 35)
+SpeedToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+SpeedToggle.BackgroundTransparency = 0.2
+SpeedToggle.Text = "Speed Hack: OFF"
+SpeedToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedToggle.TextSize = 13
+SpeedToggle.Font = Enum.Font.Gotham
+SpeedToggle.BorderSizePixel = 0
+SpeedToggle.Parent = ContentFrame
+
+local SpeedToggleCorner = Instance.new("UICorner")
+SpeedToggleCorner.CornerRadius = UDim.new(0, 6)
+SpeedToggleCorner.Parent = SpeedToggle
+
+local SpeedSliderContainer = Instance.new("Frame")
+SpeedSliderContainer.Size = UDim2.new(0, 220, 0, 30)
+SpeedSliderContainer.BackgroundTransparency = 1
+SpeedSliderContainer.Parent = ContentFrame
+
+local SliderTrack = Instance.new("Frame")
+SliderTrack.Size = UDim2.new(0, 180, 0, 4)
+SliderTrack.Position = UDim2.new(0, 20, 0, 13)
+SliderTrack.BackgroundColor3 = Color3.fromRGB(50, 30, 70)
+SliderTrack.BorderSizePixel = 0
+SliderTrack.Parent = SpeedSliderContainer
+
+local SliderTrackCorner = Instance.new("UICorner")
+SliderTrackCorner.CornerRadius = UDim.new(0, 2)
+SliderTrackCorner.Parent = SliderTrack
+
+local SliderFill = Instance.new("Frame")
+SliderFill.Size = UDim2.new(0, 0, 1, 0)
+SliderFill.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+SliderFill.BorderSizePixel = 0
+SliderFill.Parent = SliderTrack
+
+local SliderButton = Instance.new("TextButton")
+SliderButton.Size = UDim2.new(0, 14, 0, 14)
+SliderButton.Position = UDim2.new(0, 20 - 7, 0, 8)
+SliderButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+SliderButton.Text = ""
+SliderButton.BorderSizePixel = 0
+SliderButton.Parent = SpeedSliderContainer
+
+local SliderButtonCorner = Instance.new("UICorner")
+SliderButtonCorner.CornerRadius = UDim.new(0, 7)
+SliderButtonCorner.Parent = SliderButton
+
+local JumpLabel = Instance.new("TextLabel")
+JumpLabel.Size = UDim2.new(0, 220, 0, 18)
+JumpLabel.BackgroundTransparency = 1
+JumpLabel.Text = "JUMP POWER"
+JumpLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+JumpLabel.TextSize = 11
+JumpLabel.Font = Enum.Font.Gotham
+JumpLabel.TextXAlignment = Enum.TextXAlignment.Left
+JumpLabel.Parent = ContentFrame
+
+local JumpValueDisplay = Instance.new("TextLabel")
+JumpValueDisplay.Size = UDim2.new(0, 50, 0, 18)
+JumpValueDisplay.Position = UDim2.new(0, 170, 0, 0)
+JumpValueDisplay.BackgroundTransparency = 1
+JumpValueDisplay.Text = "50"
+JumpValueDisplay.TextColor3 = Color3.fromRGB(138, 43, 226)
+JumpValueDisplay.TextSize = 13
+JumpValueDisplay.Font = Enum.Font.GothamBold
+JumpValueDisplay.TextXAlignment = Enum.TextXAlignment.Right
+JumpValueDisplay.Parent = JumpLabel
+
+local JumpToggle = Instance.new("TextButton")
+JumpToggle.Size = UDim2.new(0, 220, 0, 35)
+JumpToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+JumpToggle.BackgroundTransparency = 0.2
+JumpToggle.Text = "Jump Hack: OFF"
+JumpToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+JumpToggle.TextSize = 13
+JumpToggle.Font = Enum.Font.Gotham
+JumpToggle.BorderSizePixel = 0
+JumpToggle.Parent = ContentFrame
+
+local JumpToggleCorner = Instance.new("UICorner")
+JumpToggleCorner.CornerRadius = UDim.new(0, 6)
+JumpToggleCorner.Parent = JumpToggle
+
+local JumpSliderContainer = Instance.new("Frame")
+JumpSliderContainer.Size = UDim2.new(0, 220, 0, 30)
+JumpSliderContainer.BackgroundTransparency = 1
+JumpSliderContainer.Parent = ContentFrame
+
+local JumpSliderTrack = Instance.new("Frame")
+JumpSliderTrack.Size = UDim2.new(0, 180, 0, 4)
+JumpSliderTrack.Position = UDim2.new(0, 20, 0, 13)
+JumpSliderTrack.BackgroundColor3 = Color3.fromRGB(50, 30, 70)
+JumpSliderTrack.BorderSizePixel = 0
+JumpSliderTrack.Parent = JumpSliderContainer
+
+local JumpSliderTrackCorner = Instance.new("UICorner")
+JumpSliderTrackCorner.CornerRadius = UDim.new(0, 2)
+JumpSliderTrackCorner.Parent = JumpSliderTrack
+
+local JumpSliderFill = Instance.new("Frame")
+JumpSliderFill.Size = UDim2.new(0, 0, 1, 0)
+JumpSliderFill.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+JumpSliderFill.BorderSizePixel = 0
+JumpSliderFill.Parent = JumpSliderTrack
+
+local JumpSliderButton = Instance.new("TextButton")
+JumpSliderButton.Size = UDim2.new(0, 14, 0, 14)
+JumpSliderButton.Position = UDim2.new(0, 20 - 7, 0, 8)
+JumpSliderButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+JumpSliderButton.Text = ""
+JumpSliderButton.BorderSizePixel = 0
+JumpSliderButton.Parent = JumpSliderContainer
+
+local JumpSliderButtonCorner = Instance.new("UICorner")
+JumpSliderButtonCorner.CornerRadius = UDim.new(0, 7)
+JumpSliderButtonCorner.Parent = JumpSliderButton
+
+local NoclipToggle = Instance.new("TextButton")
+NoclipToggle.Size = UDim2.new(0, 220, 0, 35)
+NoclipToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+NoclipToggle.BackgroundTransparency = 0.2
+NoclipToggle.Text = "Noclip: OFF"
+NoclipToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+NoclipToggle.TextSize = 13
+NoclipToggle.Font = Enum.Font.Gotham
+NoclipToggle.BorderSizePixel = 0
+NoclipToggle.Parent = ContentFrame
+
+local NoclipCorner = Instance.new("UICorner")
+NoclipCorner.CornerRadius = UDim.new(0, 6)
+NoclipCorner.Parent = NoclipToggle
+
+local AimbotToggle = Instance.new("TextButton")
+AimbotToggle.Size = UDim2.new(0, 220, 0, 35)
+AimbotToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+AimbotToggle.BackgroundTransparency = 0.2
+AimbotToggle.Text = "Aimbot: OFF [X]"
+AimbotToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+AimbotToggle.TextSize = 13
+AimbotToggle.Font = Enum.Font.Gotham
+AimbotToggle.BorderSizePixel = 0
+AimbotToggle.Parent = ContentFrame
+
+local AimbotCorner = Instance.new("UICorner")
+AimbotCorner.CornerRadius = UDim.new(0, 6)
+AimbotCorner.Parent = AimbotToggle
+
+local FOVLabel = Instance.new("TextLabel")
+FOVLabel.Size = UDim2.new(0, 220, 0, 18)
+FOVLabel.BackgroundTransparency = 1
+FOVLabel.Text = "FOV CIRCLE SIZE"
+FOVLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+FOVLabel.TextSize = 11
+FOVLabel.Font = Enum.Font.Gotham
+FOVLabel.TextXAlignment = Enum.TextXAlignment.Left
+FOVLabel.Parent = ContentFrame
+
+local FOVValueDisplay = Instance.new("TextLabel")
+FOVValueDisplay.Size = UDim2.new(0, 50, 0, 18)
+FOVValueDisplay.Position = UDim2.new(0, 170, 0, 0)
+FOVValueDisplay.BackgroundTransparency = 1
+FOVValueDisplay.Text = "70"
+FOVValueDisplay.TextColor3 = Color3.fromRGB(138, 43, 226)
+FOVValueDisplay.TextSize = 13
+FOVValueDisplay.Font = Enum.Font.GothamBold
+FOVValueDisplay.TextXAlignment = Enum.TextXAlignment.Right
+FOVValueDisplay.Parent = FOVLabel
+
+local FOVSliderContainer = Instance.new("Frame")
+FOVSliderContainer.Size = UDim2.new(0, 220, 0, 30)
+FOVSliderContainer.BackgroundTransparency = 1
+FOVSliderContainer.Parent = ContentFrame
+
+local FOVSliderTrack = Instance.new("Frame")
+FOVSliderTrack.Size = UDim2.new(0, 180, 0, 4)
+FOVSliderTrack.Position = UDim2.new(0, 20, 0, 13)
+FOVSliderTrack.BackgroundColor3 = Color3.fromRGB(50, 30, 70)
+FOVSliderTrack.BorderSizePixel = 0
+FOVSliderTrack.Parent = FOVSliderContainer
+
+local FOVSliderTrackCorner = Instance.new("UICorner")
+FOVSliderTrackCorner.CornerRadius = UDim.new(0, 2)
+FOVSliderTrackCorner.Parent = FOVSliderTrack
+
+local FOVSliderFill = Instance.new("Frame")
+FOVSliderFill.Size = UDim2.new(0, 0, 1, 0)
+FOVSliderFill.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+FOVSliderFill.BorderSizePixel = 0
+FOVSliderFill.Parent = FOVSliderTrack
+
+local FOVSliderButton = Instance.new("TextButton")
+FOVSliderButton.Size = UDim2.new(0, 14, 0, 14)
+FOVSliderButton.Position = UDim2.new(0, 20 - 7, 0, 8)
+FOVSliderButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+FOVSliderButton.Text = ""
+FOVSliderButton.BorderSizePixel = 0
+FOVSliderButton.Parent = FOVSliderContainer
+
+local FOVSliderButtonCorner = Instance.new("UICorner")
+FOVSliderButtonCorner.CornerRadius = UDim.new(0, 7)
+FOVSliderButtonCorner.Parent = FOVSliderButton
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = false
+FOVCircle.Color = Color3.fromRGB(138, 43, 226)
+FOVCircle.Thickness = 2
+FOVCircle.Transparency = 0.5
+FOVCircle.Filled = false
+FOVCircle.NumSides = 100
+
+local aimbotEnabled = false
+local speedEnabled = false
+local jumpEnabled = false
+local espEnabled = false
+local noclipEnabled = false
+local hitpart = "Body"
+local speedValue = 16
+local jumpValue = 50
+local fovValue = 70
+local originalSpeed = 16
+local Noclipping = nil
+local lockedTarget = nil
+local currentCharacter = nil
+local isJumping = false
+
+local espObjects = {}
+local highlightCache = {}
+
+local function isValidPlayerCharacter(model)
+    if not model or not model:IsA("Model") then return false end
+    local name = model.Name or ""
+    if string.find(name, "_dead") or string.find(string.lower(name), "dead") then return false end
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        if humanoid.Health <= 0 then return false end
+    else
+        return false
+    end
+    return true
+end
+
+local function findAllPlayerCharacters()
+    local characters = {}
+    for _, child in ipairs(workspace:GetChildren()) do
+        if isValidPlayerCharacter(child) then
+            local player = Players:GetPlayerFromCharacter(child)
+            if player and player ~= LocalPlayer then
+                table.insert(characters, child)
+            end
+        end
+    end
+    local tempFolder = workspace:FindFirstChild("_Temp")
+    if tempFolder then
+        for _, child in ipairs(tempFolder:GetChildren()) do
+            if isValidPlayerCharacter(child) then
+                local player = Players:GetPlayerFromCharacter(child)
+                if player and player ~= LocalPlayer then
+                    table.insert(characters, child)
+                end
+            end
+            if child:IsA("Folder") or child:IsA("Model") then
+                for _, subChild in ipairs(child:GetChildren()) do
+                    if isValidPlayerCharacter(subChild) then
+                        local player = Players:GetPlayerFromCharacter(subChild)
+                        if player and player ~= LocalPlayer then
+                            table.insert(characters, subChild)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return characters
+end
+
+local function getDistanceToCursor(targetPosition)
+    local mouse = LocalPlayer:GetMouse()
+    local mousePos = Vector2.new(mouse.X, mouse.Y)
+    local screenPos, onScreen = workspace.CurrentCamera:WorldToScreenPoint(targetPosition)
+    if not onScreen then return math.huge end
+    return (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+end
+
+local function applyVelocity()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+    if speedEnabled then
+        if humanoid.WalkSpeed ~= speedValue then
+            humanoid.WalkSpeed = speedValue
+        end
+        local moveDirection = humanoid.MoveDirection
+        if moveDirection.Magnitude > 0 then
+            local currentVel = rootPart.Velocity
+            local desiredVel = moveDirection * (speedValue * 1.2)
+            local newVel = currentVel:Lerp(desiredVel, 0.3)
+            newVel = Vector3.new(newVel.X, currentVel.Y, newVel.Z)
+            rootPart.Velocity = newVel
+        end
+    else
+        if originalSpeed and humanoid.WalkSpeed ~= originalSpeed then
+            humanoid.WalkSpeed = originalSpeed
+        end
+    end
+end
+
+local function StartNoclip()
+    if Noclipping then return end
+    local function NoclipLoop()
+        if noclipEnabled == false then return end
+        local character = LocalPlayer.Character
+        if character then
+            for _, child in pairs(character:GetDescendants()) do
+                if child:IsA("BasePart") and child.CanCollide == true then
+                    child.CanCollide = false
+                end
+            end
+        end
+    end
+    Noclipping = RunService.Stepped:Connect(NoclipLoop)
+end
+
+local function StopNoclip()
+    if Noclipping then
+        Noclipping:Disconnect()
+        Noclipping = nil
+    end
+end
+
+local function applyJumpVelocity()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+    if jumpEnabled then
+        local spacePressed = UserInputService:IsKeyDown(Enum.KeyCode.Space)
+        local currentState = humanoid:GetState()
+        local isOnGround = currentState == Enum.HumanoidStateType.Landed or currentState == Enum.HumanoidStateType.Running or currentState == Enum.HumanoidStateType.GettingUp
+        if spacePressed and isOnGround and not isJumping then
+            isJumping = true
+            local jumpHeight = jumpValue
+            if jumpHeight < 50 then jumpHeight = 50 end
+            local velocityY = 50 + ((jumpHeight - 50) * 0.8)
+            rootPart.Velocity = Vector3.new(rootPart.Velocity.X, velocityY, rootPart.Velocity.Z)
+            humanoid.JumpPower = jumpHeight
+        elseif not spacePressed and isOnGround then
+            isJumping = false
+        end
+        if spacePressed and currentState == Enum.HumanoidStateType.Jumping then
+            local currentVel = rootPart.Velocity
+            if currentVel.Y < 20 then
+                rootPart.Velocity = Vector3.new(currentVel.X, currentVel.Y + 8, currentVel.Z)
+            end
+        end
+    else
+        if humanoid.JumpPower ~= 50 then
+            humanoid.JumpPower = 50
+        end
+        isJumping = false
+    end
+end
+
+local function isPartVisible(part)
+    local camera = workspace.CurrentCamera
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("Head") then return false end
+    local headPos = character.Head.Position
+    local targetPos = part.Position
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character, part.Parent}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    local raycastResult = workspace:Raycast(headPos, (targetPos - headPos).Unit * (targetPos - headPos).Magnitude, raycastParams)
+    return raycastResult == nil
+end
+
+local function getTeamColor(player)
+    if player.Team then
+        return player.Team.TeamColor.Color
+    else
+        return Color3.fromRGB(255, 255, 255)
+    end
+end
+
+local function getChamColor(player, character)
+    if not character then return Color3.fromRGB(255, 0, 0) end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return Color3.fromRGB(255, 0, 0) end
+    local head = character:FindFirstChild("Head")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local checkPart = head or rootPart
+    if checkPart and not isPartVisible(checkPart) then
+        return Color3.fromRGB(255, 255, 0)
+    end
+    if humanoid.Health >= humanoid.MaxHealth then
+        return Color3.fromRGB(0, 255, 0)
+    else
+        return Color3.fromRGB(255, 0, 0)
+    end
+end
+
+local function createESP(player)
+    if espObjects[player] then return end
+    local espData = {}
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP_Name"
+    billboard.Size = UDim2.new(0, 200, 0, 25)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = CoreGui
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.Name
+    nameLabel.TextColor3 = getTeamColor(player)
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextSize = 14
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Parent = billboard
+    espData.Billboard = billboard
+    espData.NameLabel = nameLabel
+    local function createHighlight(character)
+        if highlightCache[character] then return end
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ESP_Cham"
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Enabled = true
+        highlight.Parent = character
+        highlightCache[character] = highlight
+        espData.Highlight = highlight
+    end
+    local character = nil
+    for _, char in ipairs(findAllPlayerCharacters()) do
+        if Players:GetPlayerFromCharacter(char) == player then
+            character = char
+            break
+        end
+    end
+    if character then
+        createHighlight(character)
+    end
+    espData.CharacterAdded = player.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        createHighlight(char)
+    end)
+    espData.CharacterRemoving = player.CharacterRemoving:Connect(function(char)
+        if highlightCache[char] then
+            highlightCache[char]:Destroy()
+            highlightCache[char] = nil
+        end
+    end)
+    espObjects[player] = espData
+    local updateConnection
+    updateConnection = RunService.RenderStepped:Connect(function()
+        if not espObjects[player] then
+            updateConnection:Disconnect()
+            return
+        end
+        local character = nil
+        local wsChar = workspace:FindFirstChild(player.Name)
+        if wsChar and isValidPlayerCharacter(wsChar) then
+            character = wsChar
+        end
+        if not character then
+            local tempFolder = workspace:FindFirstChild("_Temp")
+            if tempFolder then
+                local tempChar = tempFolder:FindFirstChild(player.Name)
+                if tempChar and isValidPlayerCharacter(tempChar) then
+                    character = tempChar
+                end
+                if not character then
+                    for _, folder in ipairs(tempFolder:GetChildren()) do
+                        if folder:IsA("Folder") or folder:IsA("Model") then
+                            local subChar = folder:FindFirstChild(player.Name)
+                            if subChar and isValidPlayerCharacter(subChar) then
+                                character = subChar
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if character and character:FindFirstChild("Head") then
+            local head = character:FindFirstChild("Head")
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            billboard.Adornee = head
+            if humanoid and humanoid.Health > 0 then
+                local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100)
+                nameLabel.Text = player.Name .. " | " .. healthPercent .. "%"
+                if healthPercent >= 100 then
+                    nameLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                else
+                    nameLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                end
+            else
+                billboard.Adornee = nil
+                return
+            end
+            if espData.Highlight then
+                local chamColor = getChamColor(player, character)
+                espData.Highlight.FillColor = chamColor
+                espData.Highlight.OutlineColor = chamColor
+            end
+        else
+            billboard.Adornee = nil
+        end
+    end)
+    espData.UpdateConnection = updateConnection
+end
+
+local function removeESP(player)
+    if espObjects[player] then
+        local data = espObjects[player]
+        if data.CharacterAdded then data.CharacterAdded:Disconnect() end
+        if data.CharacterRemoving then data.CharacterRemoving:Disconnect() end
+        if data.UpdateConnection then data.UpdateConnection:Disconnect() end
+        if data.Billboard then data.Billboard:Destroy() end
+        if data.Highlight then
+            data.Highlight:Destroy()
+        end
+        for char, highlight in pairs(highlightCache) do
+            if highlight and highlight.Parent and Players:GetPlayerFromCharacter(char) == player then
+                highlight:Destroy()
+                highlightCache[char] = nil
+            end
+        end
+        espObjects[player] = nil
+    end
+end
+
+local function toggleESP()
+    espEnabled = not espEnabled
+    if espEnabled then
+        ESPToggle.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        ESPToggle.Text = "ESP WALLHACK: ON"
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                createESP(player)
+            end
+        end
+    else
+        ESPToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+        ESPToggle.Text = "ESP WALLHACK: OFF"
+        for player, _ in pairs(espObjects) do
+            removeESP(player)
+        end
+    end
+end
+
+local isSliding = false
+local minSpeed = 16
+local maxSpeed = 200
+
+local function updateSpeedSlider(percent)
+    percent = math.clamp(percent, 0, 1)
+    local trackWidth = 180
+    local buttonX = 20 + (percent * trackWidth) - 7
+    SliderFill.Size = UDim2.new(percent, 0, 1, 0)
+    SliderButton.Position = UDim2.new(0, buttonX, 0, 8)
+    speedValue = math.floor(minSpeed + (maxSpeed - minSpeed) * percent)
+    SpeedValueDisplay.Text = tostring(speedValue)
+    if speedEnabled then
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = speedValue
+        end
+    end
+end
+
+local function updateSliderPosition(input)
+    local relativeX = input.Position.X - (SliderTrack.AbsolutePosition.X)
+    local percent = relativeX / SliderTrack.AbsoluteSize.X
+    updateSpeedSlider(percent)
+end
+
+SliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isSliding = true
+    end
+end)
+
+SliderTrack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isSliding = true
+        updateSliderPosition(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isSliding = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if isSliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+        updateSliderPosition(input)
+    end
+end)
+
+local isJumpSliding = false
+local minJump = 50
+local maxJump = 300
+
+local function updateJumpSlider(percent)
+    percent = math.clamp(percent, 0, 1)
+    local trackWidth = 180
+    local buttonX = 20 + (percent * trackWidth) - 7
+    JumpSliderFill.Size = UDim2.new(percent, 0, 1, 0)
+    JumpSliderButton.Position = UDim2.new(0, buttonX, 0, 8)
+    jumpValue = math.floor(minJump + (maxJump - minJump) * percent)
+    JumpValueDisplay.Text = tostring(jumpValue)
+end
+
+local function updateJumpSliderPosition(input)
+    local relativeX = input.Position.X - (JumpSliderTrack.AbsolutePosition.X)
+    local percent = relativeX / JumpSliderTrack.AbsoluteSize.X
+    updateJumpSlider(percent)
+end
+
+JumpSliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isJumpSliding = true
+    end
+end)
+
+JumpSliderTrack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isJumpSliding = true
+        updateJumpSliderPosition(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isJumpSliding = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if isJumpSliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+        updateJumpSliderPosition(input)
+    end
+end)
+
+local isFOVSliding = false
+local minFOV = 10
+local maxFOV = 500
+
+local function updateFOVCircle()
+    local camera = workspace.CurrentCamera
+    local viewportSize = camera.ViewportSize
+    local screenDiagonal = math.sqrt(viewportSize.X^2 + viewportSize.Y^2)
+    local normalizedFOV
+    if fovValue <= 173 then
+        normalizedFOV = fovValue / 173
+    else
+        local extraScale = (screenDiagonal / viewportSize.Y) - 1.0
+        normalizedFOV = 1.0 + extraScale * ((fovValue - 173) / (500 - 173))
+    end    local radius = (viewportSize.Y / 2) * normalizedFOV
+    FOVCircle.Position = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    FOVCircle.Radius = radius
+end
+
+local function updateFOVSlider(percent)
+    percent = math.clamp(percent, 0, 1)
+    local trackWidth = 180
+    local buttonX = 20 + (percent * trackWidth) - 7
+    FOVSliderFill.Size = UDim2.new(percent, 0, 1, 0)
+    FOVSliderButton.Position = UDim2.new(0, buttonX, 0, 8)
+    fovValue = math.floor(minFOV + (maxFOV - minFOV) * percent)
+    FOVValueDisplay.Text = tostring(fovValue)
+    updateFOVCircle()
+end
+
+local function updateFOVSliderPosition(input)
+    local relativeX = input.Position.X - (FOVSliderTrack.AbsolutePosition.X)
+    local percent = relativeX / FOVSliderTrack.AbsoluteSize.X
+    updateFOVSlider(percent)
+end
+
+FOVSliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isFOVSliding = true
+    end
+end)
+
+FOVSliderTrack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isFOVSliding = true
+        updateFOVSliderPosition(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isFOVSliding = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if isFOVSliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+        updateFOVSliderPosition(input)
+    end
+end)
+
+updateSpeedSlider(0)
+updateJumpSlider((50 - minJump) / (maxJump - minJump))
+updateFOVSlider((70 - minFOV) / (maxFOV - minFOV))
+
+Dropdown.MouseButton1Click:Connect(function()
+    if hitpart == "Body" then
+        hitpart = "Head"
+        Dropdown.Text = "Head"
+        Dropdown.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+    else
+        hitpart = "Body"
+        Dropdown.Text = "Body"
+        Dropdown.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+    end
+    task.wait(0.15)
+    Dropdown.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+end)
+
+ESPToggle.MouseButton1Click:Connect(function()
+    toggleESP()
+    ESPToggle.BackgroundColor3 = espEnabled and Color3.fromRGB(80, 40, 120) or Color3.fromRGB(30, 15, 45)
+    task.wait(0.15)
+    ESPToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+end)
+
+NoclipToggle.MouseButton1Click:Connect(function()
+    noclipEnabled = not noclipEnabled
+    if noclipEnabled then
+        NoclipToggle.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        NoclipToggle.Text = "Noclip: ON"
+        StartNoclip()
+    else
+        NoclipToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+        NoclipToggle.Text = "Noclip: OFF"
+        StopNoclip()
+    end
+    task.wait(0.15)
+    NoclipToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+end)
+
+local function onCharacterAdded(character)
+    currentCharacter = character
+    local humanoid = character:WaitForChild("Humanoid")
+    originalSpeed = humanoid.WalkSpeed
+end
+
+SpeedToggle.MouseButton1Click:Connect(function()
+    speedEnabled = not speedEnabled
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if speedEnabled then
+        SpeedToggle.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        SpeedToggle.Text = "Speed Hack: ON"
+        if humanoid then
+            originalSpeed = humanoid.WalkSpeed
+            humanoid.WalkSpeed = speedValue
+        end
+    else
+        SpeedToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+        SpeedToggle.Text = "Speed Hack: OFF"
+        if humanoid and originalSpeed then
+            humanoid.WalkSpeed = originalSpeed
+        end
+    end
+    task.wait(0.15)
+    SpeedToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+end)
+
+JumpToggle.MouseButton1Click:Connect(function()
+    jumpEnabled = not jumpEnabled
+    if jumpEnabled then
+        JumpToggle.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        JumpToggle.Text = "Jump Hack: ON"
+    else
+        JumpToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+        JumpToggle.Text = "Jump Hack: OFF"
+    end
+    task.wait(0.15)
+    JumpToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+end)
+
+AimbotToggle.MouseButton1Click:Connect(function()
+    aimbotEnabled = not aimbotEnabled
+    if aimbotEnabled then
+        AimbotToggle.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        AimbotToggle.Text = "Aimbot: ON [X]"
+        FOVCircle.Visible = true
+    else
+        AimbotToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+        AimbotToggle.Text = "Aimbot: OFF [X]"
+        FOVCircle.Visible = false
+        lockedTarget = nil
+    end
+    task.wait(0.15)
+    AimbotToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+end)
+
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+if LocalPlayer.Character then
+    onCharacterAdded(LocalPlayer.Character)
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.X then
+        aimbotEnabled = not aimbotEnabled
+        if aimbotEnabled then
+            AimbotToggle.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+            AimbotToggle.Text = "Aimbot: ON [X]"
+            FOVCircle.Visible = true
+        else
+            AimbotToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+            AimbotToggle.Text = "Aimbot: OFF [X]"
+            FOVCircle.Visible = false
+            lockedTarget = nil
+        end
+        task.wait(0.15)
+        AimbotToggle.BackgroundColor3 = Color3.fromRGB(30, 15, 45)
+    end
+end)
+
+local function getTargetPart(character)
+    if hitpart == "Head" then
+        local head = character:FindFirstChild("Head")
+        if head then return head end
+        for _, part in ipairs(character:GetChildren()) do
+            if part:IsA("BasePart") and (part.Name:lower() == "head" or part.Name:lower() == "headpart") then
+                return part
+            end
+        end
+        return nil
+    else
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if rootPart then return rootPart end
+        local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("LowerTorso") or character:FindFirstChild("Torso")
+        if torso then return torso end
+        return nil
+    end
+end
+
+local function isInFOV(targetPosition)
+    local camera = workspace.CurrentCamera
+    local screenPos, onScreen = camera:WorldToScreenPoint(targetPosition)
+    if not onScreen then return false end
+    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local targetScreen = Vector2.new(screenPos.X, screenPos.Y)
+    local distance = (targetScreen - screenCenter).Magnitude
+    return distance <= FOVCircle.Radius
+end
+
+RunService.RenderStepped:Connect(function()
+    if not aimbotEnabled then return end
+    local localCharacter = LocalPlayer.Character
+    if not localCharacter or not localCharacter:FindFirstChild("HumanoidRootPart") then return end
+    local camera = workspace.CurrentCamera
+    if lockedTarget then
+        local targetChar = lockedTarget.Character
+        if targetChar and targetChar.Parent and isValidPlayerCharacter(targetChar) then
+            local targetPart = getTargetPart(targetChar)
+            if targetPart and targetPart.Parent == targetChar then
+                local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 and isInFOV(targetPart.Position) then
+                    camera.CFrame = CFrame.new(camera.CFrame.Position, targetPart.Position)
+                    return
+                end
+            end
+        end
+        lockedTarget = nil
+    end
+    local allCharacters = findAllPlayerCharacters()
+    local closestTarget = nil
+    local closestDistance = math.huge
+    local closestCharacter = nil
+    for _, character in ipairs(allCharacters) do
+        if isValidPlayerCharacter(character) then
+            local targetPart = getTargetPart(character)
+            if targetPart and targetPart.Parent == character then
+                local targetPos = targetPart.Position
+                if isInFOV(targetPos) then
+                    local distance = getDistanceToCursor(targetPos)
+                    if distance < closestDistance then
+                        closestDistance = distance
+                        closestTarget = targetPart
+                        closestCharacter = character
+                    end
+                end
+            end
+        end
+    end
+    if closestTarget and closestCharacter then
+        lockedTarget = {
+            Part = closestTarget,
+            Character = closestCharacter
+        }
+        camera.CFrame = CFrame.new(camera.CFrame.Position, closestTarget.Position)
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if speedEnabled then
+        applyVelocity()
+    end
+    if jumpEnabled then
+        applyJumpVelocity()
+    end
+end)
+
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+    updateFOVCircle()
+end)
+
+updateFOVCircle()
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer and espEnabled then
+        createESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if espObjects[player] then
+        removeESP(player)
+    end
+    if lockedTarget and lockedTarget.Player == player then
+        lockedTarget = nil
+    end
+end)
