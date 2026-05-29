@@ -136,6 +136,9 @@ local state = {
 	InfCamera = true,
 	Fly = false,
 	FlySpeed = 18,
+	TweenFollow = false,
+	TweenFollowPlayer = "",
+	TweenFollowSpeed = 18,
 	WeaponAura = false,
 	MineAura = false,
 	MobAura = false,
@@ -447,6 +450,8 @@ local autoHeal = {
 	FarmTween = nil,
 	FarmTweenGoal = nil,
 	FarmTweenLoop = false,
+	TweenFollowTween = nil,
+	TweenFollowLoop = false,
 	DropTimer = 0,
 	DropIndex = 1,
 	DropEstimateLastRemaining = nil,
@@ -2746,6 +2751,7 @@ function instantPickupChild(item)
 	if not state.AutoPickup and not state.PickupEssence then
 		return
 	end
+	local essenceOnly = state.PickupEssence and not state.AutoPickup
 	local now = os.clock()
 	if now - autoHeal.PickupBurstWindow > 0.5 then
 		autoHeal.PickupBurstWindow = now
@@ -2759,7 +2765,6 @@ function instantPickupChild(item)
 	if not hum or hum.Health <= 0 or not root then
 		return
 	end
-	local essenceOnly = state.PickupEssence and not state.AutoPickup
 	queuePickupItem(item, essenceOnly, root)
 	sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
 	task.delay(0.12, function()
@@ -3385,6 +3390,97 @@ function updateAutoFarm(dt)
 				end
 			end
 		end
+	end
+end
+
+function collectTweenFollowPlayers()
+	local names = {}
+	for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+		if targetPlayer ~= player then
+			table.insert(names, targetPlayer.Name)
+		end
+	end
+	table.sort(names)
+	if state.TweenFollowPlayer == "" and #names > 0 then
+		state.TweenFollowPlayer = names[1]
+	end
+	return names
+end
+
+function tweenFollowTargetRoot()
+	if state.TweenFollowPlayer == "" then
+		return nil
+	end
+	local playersFolder = workspace:FindFirstChild("Players")
+	local model = playersFolder and playersFolder:FindFirstChild(state.TweenFollowPlayer)
+	local targetPlayer = S.Players:FindFirstChild(state.TweenFollowPlayer)
+	model = model or (targetPlayer and targetPlayer.Character)
+	return model and getAdornee(model) or nil
+end
+
+function tweenFollowTo(root, targetRoot)
+	if not root or not targetRoot then
+		return
+	end
+	local _, hum = getCharacterParts()
+	if not hum then
+		return
+	end
+	local velocity = targetRoot.AssemblyLinearVelocity
+	local direction = velocity and Vector3.new(velocity.X, 0, velocity.Z) or Vector3.zero
+	if direction.Magnitude < 1 then
+		local look = targetRoot.CFrame.LookVector
+		direction = Vector3.new(look.X, 0, look.Z)
+	end
+	if direction.Magnitude < 0.05 then
+		direction = Vector3.new(0, 0, -1)
+	end
+	local targetPosition = targetRoot.Position + direction.Unit * 7
+	local distance = (root.Position - targetPosition).Magnitude
+	hum.WalkSpeed = state.TweenFollowSpeed
+	if distance < 2.5 then
+		hum:Move(Vector3.zero, false)
+		return
+	end
+	if autoHeal.TweenFollowTween then
+		pcall(function()
+			autoHeal.TweenFollowTween:Cancel()
+		end)
+		autoHeal.TweenFollowTween = nil
+	end
+	hum:MoveTo(targetPosition)
+end
+
+function startTweenFollowLoop()
+	if autoHeal.TweenFollowLoop then
+		return
+	end
+	autoHeal.TweenFollowLoop = true
+	task.spawn(function()
+		while screenGui.Parent and state.TweenFollow do
+			local _, hum, root = getCharacterParts()
+			local targetRoot = tweenFollowTargetRoot()
+			if hum and hum.Health > 0 and root and targetRoot then
+				tweenFollowTo(root, targetRoot)
+			elseif state.TweenFollowPlayer ~= "" then
+				notify("Tween Follow", "Selected player not found.")
+				state.TweenFollow = false
+				break
+			end
+			task.wait(0.12)
+		end
+		autoHeal.TweenFollowLoop = false
+	end)
+end
+
+function stopTweenFollow()
+	state.TweenFollow = false
+	autoHeal.TweenFollowLoop = false
+	if autoHeal.TweenFollowTween then
+		pcall(function()
+			autoHeal.TweenFollowTween:Cancel()
+		end)
+		autoHeal.TweenFollowTween = nil
 	end
 end
 
@@ -7096,6 +7192,34 @@ createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed 
 	state.FlySpeed = v
 end)
 
+sections.TweenFollow = section(playerPage, "Tween Follow")
+createChoiceDropdown(sections.TweenFollow, "Follow Player", collectTweenFollowPlayers, function()
+	return state.TweenFollowPlayer ~= "" and state.TweenFollowPlayer or "None"
+end, function(value)
+	state.TweenFollowPlayer = value
+end)
+createToggle(sections.TweenFollow, "Tween Follow", function() return state.TweenFollow end, function(v)
+	state.TweenFollow = v
+	if v then
+		if state.TweenFollowPlayer == "" then
+			local names = collectTweenFollowPlayers()
+			state.TweenFollowPlayer = names[1] or ""
+		end
+		if state.TweenFollowPlayer == "" then
+			state.TweenFollow = false
+			notify("Tween Follow", "No players found.")
+			return
+		end
+		notify("Tween Follow", "Following " .. state.TweenFollowPlayer)
+		startTweenFollowLoop()
+	else
+		stopTweenFollow()
+	end
+end)
+createSlider(sections.TweenFollow, "Tween Follow Speed", 1, 23, function() return state.TweenFollowSpeed end, function(v)
+	state.TweenFollowSpeed = v
+end)
+
 sections.Auras = section(playerPage, "Auras")
 autoHeal.AuraRedraws.Weapon = createToggle(sections.Auras, "Weapon Aura", function() return state.WeaponAura end, function(v)
 	setAura("WeaponAura", v, "Weapon Aura")
@@ -7507,6 +7631,7 @@ end)
 
 connect(close.MouseButton1Click, function()
 	stopFarmTweening()
+	stopTweenFollow()
 	destroyChestPreview()
 	cleanupItemOrbit()
 	clearPlantBoxVisualizer()
@@ -7638,6 +7763,13 @@ connect(S.UserInputService.InputEnded, function(input)
 end)
 
 connect(player.CharacterAdded, function(newCharacter)
+	if autoHeal.TweenFollowTween then
+		pcall(function()
+			autoHeal.TweenFollowTween:Cancel()
+		end)
+		autoHeal.TweenFollowTween = nil
+	end
+	autoHeal.TweenFollowLoop = false
 	character = newCharacter
 	humanoid = character:WaitForChild("Humanoid")
 	rootPart = character:WaitForChild("HumanoidRootPart")
@@ -7660,6 +7792,9 @@ connect(player.CharacterAdded, function(newCharacter)
 	end
 	if state.Dance then
 		startDance()
+	end
+	if state.TweenFollow then
+		startTweenFollowLoop()
 	end
 end)
 
@@ -7736,6 +7871,9 @@ connect(S.RunService.RenderStepped, function(dt)
 	enforceMovementOverrides()
 	updateFreecam(dt)
 	updateFly(dt)
+	if state.TweenFollow and not autoHeal.TweenFollowLoop then
+		startTweenFollowLoop()
+	end
 	updateNoclip(dt)
 	updateAutoRun()
 	updateAutoDisconnect(dt)
@@ -7899,6 +8037,7 @@ end)
 
 screenGui.Destroying:Connect(function()
 	stopFarmTweening()
+	stopTweenFollow()
 	if state.Freecam then
 		setFreecam(false)
 	end
