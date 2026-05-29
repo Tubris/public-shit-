@@ -2617,6 +2617,17 @@ function queuePickupItem(item, essenceOnly, root)
 	end
 end
 
+function isChestContentItem(item)
+	local current = item
+	while current and current ~= workspace do
+		if current.Name == "Contents" then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
 function pickupTopObject(item)
 	if not item or not (item:IsA("Model") or item:IsA("BasePart") or item:IsA("Folder")) then
 		return nil
@@ -2629,6 +2640,9 @@ function pickupTopObject(item)
 end
 
 function trackPickupObject(item)
+	if isChestContentItem(item) then
+		return
+	end
 	local topObject = pickupTopObject(item)
 	if topObject then
 		autoHeal.PickupTracked[topObject] = true
@@ -2649,8 +2663,10 @@ end
 
 function queueTrackedPickups(essenceOnly, root)
 	for item in pairs(autoHeal.PickupTracked) do
-		if item and item.Parent then
+		if item and item.Parent and (state.AutoPickupChests or not isChestContentItem(item)) then
 			queuePickupItem(item, essenceOnly, root)
+		elseif item and item.Parent then
+			autoHeal.PickupTracked[item] = nil
 		else
 			autoHeal.PickupTracked[item] = nil
 		end
@@ -2746,6 +2762,9 @@ function pickupClosestItem(essenceOnly)
 end
 
 function instantPickupChild(item)
+	if isChestContentItem(item) and not state.AutoPickupChests then
+		return
+	end
 	item = pickupTopObject(item)
 	if not item then
 		return
