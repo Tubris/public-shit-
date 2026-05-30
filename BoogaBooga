@@ -1891,13 +1891,7 @@ function readPlaceIdValue(container, names)
 end
 
 function teleportToVoidWorld()
-	local ok, err = pcall(function()
-		S.TeleportService:Teleport(PLACE.VoidWorld, player)
-	end)
-	if not ok then
-		warn("Void World teleport failed:", err)
-		notify("Void World Teleport", "Teleport failed. Check output.")
-	end
+	game:GetService("TeleportService"):Teleport(11879754496)
 end
 
 function teleportToOverworld()
