@@ -29,10 +29,10 @@ local PLACE = {
 }
 
 function isVoidWorld()
-	if game.PlaceId == PLACE.Overworld then
+	if game.PlaceId == PLACE.Overworld or game.PlaceId == PLACE.VoidWorld or game.GameId == PLACE.VoidWorld then
 		return false
 	end
-	return game.PlaceId == PLACE.VoidWorld or game.GameId == PLACE.VoidWorld
+	return
 end
 
 function voidSlow(normalSeconds, voidSeconds)
