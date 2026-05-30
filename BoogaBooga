@@ -35,6 +35,12 @@ function isVoidWorld()
 	return
 end
 
+function isVoidContentWorld()
+	return game.PlaceId == PLACE.VoidWorld
+		or game.GameId == PLACE.VoidWorld
+		or game.PlaceId == 11879754496
+end
+
 function voidSlow(normalSeconds, voidSeconds)
 	return isVoidWorld() and voidSeconds or normalSeconds
 end
@@ -139,6 +145,9 @@ local state = {
 	TweenFollow = false,
 	TweenFollowPlayer = "",
 	TweenFollowSpeed = 18,
+	TrapPlayer = "",
+	TrapWallType = "Crystal Wall",
+	TrapKey = Enum.KeyCode.B,
 	WeaponAura = false,
 	MineAura = false,
 	MobAura = false,
@@ -153,6 +162,7 @@ local state = {
 	IslandRopeNotifier = true,
 	PlayerTextSize = 12,
 	PlayerFov = 100,
+	PlayerMaxEspDistance = 10000,
 
 	OreEsp = false,
 	EntityEsp = false,
@@ -168,6 +178,7 @@ local state = {
 	WorldDistance = true,
 	WorldTracers = false,
 	WorldTextSize = 12,
+	WorldMaxEspDistance = 10000,
 	WorldMaxObjects = 55,
 	DroppedMaxObjects = 18,
 	WorldRefreshTime = 7,
@@ -208,6 +219,8 @@ local selections = {
 		Obsidian = true,
 		["Void Ore"] = true,
 		Emerald = true,
+		["Magnetite Rock"] = true,
+		["Flaming Coral"] = true,
 	},
 	Entity = {},
 	Portal = {},
@@ -236,7 +249,8 @@ local selections = {
 
 local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangefruit", "Orange", "Apple", "Lemon", "Berry", "Banana", "Bluefruit", "Coconut", "Oddberry", "Strawberry", "Sunfruit", "Watermelon", "Jelly", "Blood Fruit" }
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
-local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald" }
+local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald", "Magnetite Rock", "Flaming Coral" }
+local trapWallTypes = { "Wood Wall", "Stone Wall", "Ice Wall", "Iron Wall", "Adurite Wall", "Obsidian Wall", "Crystal Wall", "Magnetite Wall", "Emerald Wall" }
 local autoPickupRangeSq = 900
 local autoPickupChestRangeSq = 900
 local oreFallbackColors = {
@@ -248,6 +262,8 @@ local oreFallbackColors = {
 	Obsidian = Color3.fromRGB(36, 24, 52),
 	["Void Ore"] = Color3.fromRGB(145, 80, 255),
 	Emerald = Color3.fromRGB(55, 220, 120),
+	["Magnetite Rock"] = Color3.fromRGB(105, 165, 180),
+	["Flaming Coral"] = Color3.fromRGB(255, 105, 65),
 }
 local oreAliases = {
 	["Adurite Rich Rock"] = "Adurite",
@@ -256,6 +272,8 @@ local oreAliases = {
 	["Obsidian Boulder"] = "Obsidian",
 	["Void Crag"] = "Void Ore",
 	["Emerald Lode"] = "Emerald",
+	["Magnetite Rock"] = "Magnetite Rock",
+	["Flaming Coral"] = "Flaming Coral",
 }
 
 local filteredDroppedItems = {
@@ -319,6 +337,7 @@ local worldRules = {
 			["Soulless God"] = Color3.fromRGB(175, 175, 190),
 			["Strange God"] = Color3.fromRGB(95, 255, 175),
 			["Crystal Guardian"] = Color3.fromRGB(150, 235, 255),
+			["Ancient Mercy Tree"] = Color3.fromRGB(105, 255, 185),
 		},
 	},
 	Portal = {
@@ -340,6 +359,11 @@ local worldRules = {
 		color = Color3.fromRGB(255, 255, 255),
 	},
 }
+
+local existingGui = playerGui:FindFirstChild("ChubbisonMe")
+if existingGui then
+	existingGui:Destroy()
+end
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ChubbisonMe"
@@ -419,6 +443,8 @@ local autoHeal = {
 	PickupBurstWindow = 0,
 	PickupBurstCount = 0,
 	PickupTracked = {},
+	PickupBoundContainers = {},
+	PickupTrackedInitialized = false,
 	PlayerEspTimer = 0,
 	OrbitTimer = 0,
 	OrbitLastTime = 0,
@@ -454,6 +480,8 @@ local autoHeal = {
 	TweenFollowLoop = false,
 	TweenFollowLastMove = 0,
 	TweenFollowLastGoal = nil,
+	TweenFollowLastJump = 0,
+	PinchSide = 1,
 	DropTimer = 0,
 	DropIndex = 1,
 	DropEstimateLastRemaining = nil,
@@ -471,6 +499,7 @@ local autoHeal = {
 	DropOrder = {},
 	DropHadTargets = false,
 	DropEmptySince = 0,
+	DropStartTime = 0,
 	GodCounters = {},
 	GodRespawns = {},
 	GodRespawnTimer = 0,
@@ -1891,7 +1920,13 @@ function readPlaceIdValue(container, names)
 end
 
 function teleportToVoidWorld()
-	game:GetService("TeleportService"):Teleport(11879754496)
+	local ok, err = pcall(function()
+		S.TeleportService:Teleport(11879754496, player)
+	end)
+	if not ok then
+		warn("Void World teleport failed:", err)
+		notify("Void World Teleport", "Teleport failed. Check output.")
+	end
 end
 
 function teleportToOverworld()
@@ -2523,6 +2558,18 @@ function animatePickupPart(part)
 	end)
 end
 
+function pickupEncode(entityID)
+	return string.pack("<BBI3x", 0x01, 0xE7, entityID)
+end
+
+function getPickupByteNet()
+	if autoHeal.PickupByteNet and autoHeal.PickupByteNet.Parent then
+		return autoHeal.PickupByteNet
+	end
+	autoHeal.PickupByteNet = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
+	return autoHeal.PickupByteNet
+end
+
 function sendPickupPacket(entityID)
 	local now = os.clock()
 	local lastSent = autoHeal.PickupSent[entityID]
@@ -2530,17 +2577,20 @@ function sendPickupPacket(entityID)
 		return false
 	end
 	autoHeal.PickupSent[entityID] = now
-	
-	-- Use the working Packets.Pickup.send method
-	if loadPickupModules() and autoHeal.PickupRemote then
-		local success, err = pcall(function()
-			autoHeal.PickupRemote.send(entityID)
+	local remote = getPickupByteNet()
+	if remote then
+		local ok = pcall(function()
+			remote:FireServer(buffer.fromstring(pickupEncode(entityID)))
 		end)
-		if success then
+		if ok then
 			return true
 		end
 	end
-	
+	if loadPickupModules() and autoHeal.PickupRemote then
+		return pcall(function()
+			autoHeal.PickupRemote.send(entityID)
+		end)
+	end
 	return false
 end
 
@@ -2793,12 +2843,52 @@ function updateAutoPickup(dt)
 		table.clear(autoHeal.PickupQueueIds)
 		return
 	end
+	bindPickupContainers()
 	autoHeal.PickupTimer += dt
 	if autoHeal.PickupTimer < (state.AutoPickup and voidSlow(0.02, 0.65) or voidSlow(0.14, 1)) then
 		return
 	end
 	autoHeal.PickupTimer = 0
 	pickupClosestItem(state.PickupEssence and not state.AutoPickup)
+end
+
+function resetPickupRuntime()
+	table.clear(autoHeal.PickupQueue)
+	table.clear(autoHeal.PickupQueueIds)
+	table.clear(autoHeal.PickupSent)
+	table.clear(autoHeal.PickupTracked)
+	table.clear(autoHeal.PickupBoundContainers)
+	autoHeal.PickupBurstWindow = 0
+	autoHeal.PickupBurstCount = 0
+	autoHeal.PickupTrackedInitialized = false
+	autoHeal.PickupTimer = 0
+	autoHeal.PickupByteNet = nil
+end
+
+function bindPickupContainer(container)
+	if not container or autoHeal.PickupBoundContainers[container] then
+		return
+	end
+	autoHeal.PickupBoundContainers[container] = true
+	connect(container.ChildAdded, instantPickupChild)
+	if container.Name == "Items" then
+		table.clear(autoHeal.PickupTracked)
+		trackPickupContainer(container)
+		autoHeal.PickupTrackedInitialized = true
+		connect(container.ChildAdded, trackPickupObject)
+		connect(container.DescendantAdded, trackPickupObject)
+		connect(container.DescendantAdded, instantPickupChild)
+	else
+		for _, item in ipairs(container:GetChildren()) do
+			trackPickupObject(item)
+		end
+	end
+end
+
+function bindPickupContainers()
+	for _, folderName in ipairs({ "Items", "DroppedItems", "Drops" }) do
+		bindPickupContainer(workspace:FindFirstChild(folderName))
+	end
 end
 
 function cleanupItemOrbit()
@@ -3123,17 +3213,43 @@ function updateAutoDropEstimate(remaining)
 end
 
 function finishAutoDrop()
+	local elapsed = autoHeal.DropStartTime > 0 and (os.clock() - autoHeal.DropStartTime) or 0
 	state.AutoDrop = false
 	autoHeal.DropTimer = 0
 	autoHeal.DropIndex = 1
 	autoHeal.DropHadTargets = false
 	autoHeal.DropEmptySince = 0
+	autoHeal.DropStartTime = 0
 	resetAutoDropEstimate(false)
-	notify("Auto Drop", "Finished dropping selected items.")
+	notify("Auto Drop", "Finished dropping selected items. Total time: " .. formatShortTime(elapsed))
 	if autoDropToggleRedraw then
 		autoDropToggleRedraw()
 		task.defer(autoDropToggleRedraw)
 	end
+end
+
+function activeAutoDropNames()
+	local names = {}
+	local seen = {}
+	for _, name in ipairs(autoHeal.DropOrder) do
+		if selections.AutoDrop[name] == true and not seen[name] then
+			seen[name] = true
+			table.insert(names, name)
+		end
+	end
+	if #names == 0 then
+		for name, selected in pairs(selections.AutoDrop) do
+			if selected == true and not seen[name] then
+				seen[name] = true
+				table.insert(names, name)
+			end
+		end
+		table.sort(names)
+		for _, name in ipairs(names) do
+			table.insert(autoHeal.DropOrder, name)
+		end
+	end
+	return names, seen
 end
 
 function updateAutoDrop(dt)
@@ -3146,7 +3262,11 @@ function updateAutoDrop(dt)
 		end
 		autoHeal.DropHadTargets = false
 		autoHeal.DropEmptySince = 0
+		autoHeal.DropStartTime = 0
 		return
+	end
+	if autoHeal.DropStartTime == 0 then
+		autoHeal.DropStartTime = os.clock()
 	end
 	autoHeal.DropTimer += dt
 	if autoHeal.DropTimer < (isVoidWorld() and math.max(2, state.AutoDropDelay / 1000 * 10) or math.max(0.001, state.AutoDropDelay / 1000)) then
@@ -3166,56 +3286,37 @@ function updateAutoDrop(dt)
 	end
 	local slots = {}
 	local remaining = 0
+	local orderedNames, selectedNames = activeAutoDropNames()
 	local inventory = autoHeal.GameUtil.Data and autoHeal.GameUtil.Data.inventory
 	for slot, item in pairs(inventory or {}) do
 		local quantity = dropItemQuantity(item)
-		if item and item.name and item.name ~= "Rock" and selections.AutoDrop[item.name] and quantity > 0 then
+		if item and item.name and item.name ~= "Rock" and selectedNames[item.name] and quantity > 0 then
 			table.insert(slots, { Name = item.name, Slot = slot })
 			remaining += quantity
 		end
 	end
-	updateAutoDropEstimate(remaining)
+	if remaining > 0 then
+		updateAutoDropEstimate(remaining)
+	end
 	local targets = {}
-	for _, name in ipairs(autoHeal.DropOrder) do
+	for _, name in ipairs(orderedNames) do
 		for _, target in ipairs(slots) do
 			if target.Name == name then
 				table.insert(targets, target)
 			end
 		end
 	end
-	for _, target in ipairs(slots) do
-		if selections.AutoDrop[target.Name] then
-			local found = false
-			for _, existingTarget in ipairs(targets) do
-				found = found or existingTarget.Slot == target.Slot
-			end
-			if not found then
-				table.insert(targets, target)
-			end
-		end
-	end
-	if #targets == 0 then
+	if remaining <= 0 or #targets == 0 or #orderedNames == 0 then
 		autoHeal.DropTimer = 0
 		autoHeal.DropIndex = 1
-		if state.AutoDropStopFarming then
+		if state.AutoDropStopFarming and (state.AutoHarvest or state.AutoPlant or state.TweenPlantBoxes or state.TweenHarvest) then
 			autoHeal.DropEstimateLabel = ""
 			if autoDropToggleRedraw then
 				autoDropToggleRedraw()
 			end
 			return
 		end
-		local now = os.clock()
-		if autoHeal.DropHadTargets then
-			autoHeal.DropEmptySince = autoHeal.DropEmptySince > 0 and autoHeal.DropEmptySince or now
-			if now - autoHeal.DropEmptySince >= 1.5 then
-				finishAutoDrop()
-			end
-		else
-			autoHeal.DropEstimateLabel = "..."
-			if autoDropToggleRedraw then
-				autoDropToggleRedraw()
-			end
-		end
+		finishAutoDrop()
 		return
 	end
 	autoHeal.DropHadTargets = true
@@ -3411,6 +3512,10 @@ function collectTweenFollowPlayers()
 	return names
 end
 
+function collectTrapWallTypes()
+	return trapWallTypes
+end
+
 function tweenFollowTargetRoot()
 	if state.TweenFollowPlayer == "" or state.TweenFollowPlayer == "None" then
 		return nil
@@ -3420,6 +3525,154 @@ function tweenFollowTargetRoot()
 	local targetPlayer = S.Players:FindFirstChild(state.TweenFollowPlayer)
 	model = model or (targetPlayer and targetPlayer.Character)
 	return model and getAdornee(model) or nil
+end
+
+function selectClosestTweenFollowPlayer()
+	local _, hum, root = getCharacterParts()
+	if not hum or hum.Health <= 0 or not root then
+		notify("Tween Follow", "Local player not ready.")
+		return
+	end
+	local playersFolder = workspace:FindFirstChild("Players")
+	local closestName
+	local closestDistanceSq = math.huge
+	for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+		if targetPlayer ~= player then
+			local model = playersFolder and playersFolder:FindFirstChild(targetPlayer.Name)
+			model = model or targetPlayer.Character
+			local targetRoot = model and getAdornee(model)
+			if targetRoot then
+				local offset = root.Position - targetRoot.Position
+				local distanceSq = offset:Dot(offset)
+				if distanceSq < closestDistanceSq then
+					closestDistanceSq = distanceSq
+					closestName = targetPlayer.Name
+				end
+			end
+		end
+	end
+	if not closestName then
+		notify("Tween Follow", "No nearby player found.")
+		return
+	end
+	state.TweenFollowPlayer = closestName
+	if tweenFollowDropdownRedraw then
+		tweenFollowDropdownRedraw()
+	end
+	notify("Tween Follow", string.format("Selected closest: %s [%dm]", closestName, math.floor(math.sqrt(closestDistanceSq) + 0.5)))
+	if state.TweenFollow then
+		startTweenFollowLoop()
+	end
+end
+
+function trapTargetRoot()
+	if state.TrapPlayer == "" or state.TrapPlayer == "None" then
+		return nil
+	end
+	local playersFolder = workspace:FindFirstChild("Players")
+	local model = playersFolder and playersFolder:FindFirstChild(state.TrapPlayer)
+	local targetPlayer = S.Players:FindFirstChild(state.TrapPlayer)
+	model = model or (targetPlayer and targetPlayer.Character)
+	return model and getAdornee(model) or nil
+end
+
+function selectClosestTrapPlayer()
+	local _, hum, root = getCharacterParts()
+	if not hum or hum.Health <= 0 or not root then
+		notify("Pinch Player", "Local player not ready.")
+		return
+	end
+	local playersFolder = workspace:FindFirstChild("Players")
+	local closestName
+	local closestDistanceSq = math.huge
+	for _, targetPlayer in ipairs(S.Players:GetPlayers()) do
+		if targetPlayer ~= player then
+			local model = playersFolder and playersFolder:FindFirstChild(targetPlayer.Name)
+			model = model or targetPlayer.Character
+			local targetRoot = model and getAdornee(model)
+			if targetRoot then
+				local offset = root.Position - targetRoot.Position
+				local distanceSq = offset:Dot(offset)
+				if distanceSq < closestDistanceSq then
+					closestDistanceSq = distanceSq
+					closestName = targetPlayer.Name
+				end
+			end
+		end
+	end
+	if not closestName then
+		notify("Pinch Player", "No nearby player found.")
+		return
+	end
+	state.TrapPlayer = closestName
+	if trapPlayerDropdownRedraw then
+		trapPlayerDropdownRedraw()
+	end
+	notify("Pinch Player", string.format("Selected closest: %s [%dm]", closestName, math.floor(math.sqrt(closestDistanceSq) + 0.5)))
+end
+
+function placeTrapWall(cf, wallType, silent)
+	if not loadAutoHealModules() or not autoHeal.Packets.PlaceStructure then
+		if not silent then
+			notify("Pinch Player", "PlaceStructure packet not ready.")
+		end
+		return false
+	end
+	local ok = pcall(function()
+		autoHeal.Packets.PlaceStructure.send({
+			cframe = cf,
+			buildingName = wallType,
+		})
+	end)
+	return ok
+end
+
+function trapSelectedPlayer(silent)
+	local targetRoot = trapTargetRoot()
+	if not targetRoot then
+		if not silent then
+			notify("Pinch Player", "Select a player first.")
+		end
+		return false
+	end
+	local forward = targetRoot.CFrame.LookVector
+	local right = targetRoot.CFrame.RightVector
+	local side = autoHeal.PinchSide or 1
+	local wallPosition = targetRoot.Position + forward * 10 + right * (0.5 * side)
+	local wallCFrame = CFrame.new(wallPosition.X, targetRoot.Position.Y - 2, wallPosition.Z)
+	if placeTrapWall(wallCFrame, state.TrapWallType, silent) then
+		autoHeal.PinchSide = -side
+		if not silent then
+			notify("Pinch Player", string.format("%s placed near %s.", state.TrapWallType, state.TrapPlayer))
+		end
+		return true
+	end
+	if not silent then
+		notify("Pinch Player", "Wall placement failed.")
+	end
+	return false
+end
+
+function shouldTweenFollowJump(root, targetRoot, targetPosition)
+	local now = os.clock()
+	if now - (autoHeal.TweenFollowLastJump or 0) < 0.75 then
+		return false
+	end
+	if targetPosition.Y - root.Position.Y > 2.2 then
+		return true
+	end
+	local offset = targetPosition - root.Position
+	local flat = Vector3.new(offset.X, 0, offset.Z)
+	if flat.Magnitude < 3 then
+		return false
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character, targetRoot.Parent }
+	params.IgnoreWater = true
+	local origin = root.Position + Vector3.new(0, 1.6, 0)
+	local hit = workspace:Raycast(origin, flat.Unit * 5, params)
+	return hit ~= nil and hit.Instance and hit.Instance.CanCollide
 end
 
 function tweenFollowTo(root, targetRoot)
@@ -3447,6 +3700,13 @@ function tweenFollowTo(root, targetRoot)
 		return
 	end
 	local now = os.clock()
+	if hum.FloorMaterial ~= Enum.Material.Air and shouldTweenFollowJump(root, targetRoot, targetPosition) then
+		autoHeal.TweenFollowLastJump = now
+		hum.Jump = true
+		pcall(function()
+			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		end)
+	end
 	if autoHeal.TweenFollowLastGoal and (targetPosition - autoHeal.TweenFollowLastGoal).Magnitude < 2.5 and now - autoHeal.TweenFollowLastMove < 0.45 then
 		return
 	end
@@ -3493,6 +3753,7 @@ function stopTweenFollow()
 	autoHeal.TweenFollowLoop = false
 	autoHeal.TweenFollowLastMove = 0
 	autoHeal.TweenFollowLastGoal = nil
+	autoHeal.TweenFollowLastJump = 0
 	if autoHeal.TweenFollowTween then
 		pcall(function()
 			autoHeal.TweenFollowTween:Cancel()
@@ -3520,12 +3781,14 @@ function placeStructureEncode(buildingName, cf)
 end
 
 function sendPlantBoxPlacement(cf)
-	local remote = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
-	if not remote then
+	if not loadAutoHealModules() or not autoHeal.Packets.PlaceStructure then
 		return false
 	end
 	local ok = pcall(function()
-		remote:FireServer(buffer.fromstring(placeStructureEncode("Plant Box", cf)))
+		autoHeal.Packets.PlaceStructure.send({
+			cframe = cf,
+			buildingName = "Plant Box",
+		})
 	end)
 	return ok
 end
@@ -4545,7 +4808,7 @@ function createFilterDropdown(parent, label, getNames, selections, defaultSelect
 			positionDropdownOverlay(overlay, headerButton, withSearch and 250 or 220)
 			refreshOptions()
 			if searchBox then
-				searchBox:CaptureFocus()
+				searchBox:ReleaseFocus()
 			end
 		end
 	end)
@@ -4713,7 +4976,7 @@ function createChoiceDropdown(parent, label, choices, getValue, setValue)
 			dropdownBlocker.Visible = true
 			syncPageScrolling()
 			positionDropdownOverlay(overlay, headerButton, math.min(#currentChoices() * 30 + 46, 250))
-			searchBox:CaptureFocus()
+			searchBox:ReleaseFocus()
 		end
 		redraw()
 	end)
@@ -4921,7 +5184,7 @@ function applyCharacterSettings()
 			root.Anchored = false
 		end
 	end
-	local targetWalkSpeed = state.WalkSpeedEnabled and state.WalkSpeed or defaults.WalkSpeed
+	local targetWalkSpeed = state.TweenFollow and state.TweenFollowSpeed or (state.WalkSpeedEnabled and state.WalkSpeed or defaults.WalkSpeed)
 	if hum.WalkSpeed ~= targetWalkSpeed then
 		hum.WalkSpeed = targetWalkSpeed
 	end
@@ -4968,8 +5231,9 @@ function enforceMovementOverrides()
 		return
 	end
 
-	if state.WalkSpeedEnabled and hum.WalkSpeed ~= state.WalkSpeed then
-		hum.WalkSpeed = state.WalkSpeed
+	local targetWalkSpeed = state.TweenFollow and state.TweenFollowSpeed or state.WalkSpeed
+	if (state.TweenFollow or state.WalkSpeedEnabled) and hum.WalkSpeed ~= targetWalkSpeed then
+		hum.WalkSpeed = targetWalkSpeed
 	end
 
 	if state.JumpEnabled then
@@ -4991,7 +5255,7 @@ function syncFreecamMouse()
 		return
 	end
 
-	if state.PanelVisible then
+	if state.PanelVisible and not state.Minimized then
 		S.UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		S.UserInputService.MouseIconEnabled = true
 	else
@@ -5459,6 +5723,31 @@ function drawTracer(frame, worldPosition, enabled)
 	frame.Visible = true
 end
 
+function isWithinEspDistance(adornee, maxDistance)
+	if not adornee then
+		return false
+	end
+	local _, _, root = getCharacterParts()
+	if not root then
+		return true
+	end
+	local distance = maxDistance or 10000
+	local offset = root.Position - adornee.Position
+	return offset:Dot(offset) <= distance * distance
+end
+
+function destroyPlayerEsp(targetPlayer)
+	local obj = esp.Players[targetPlayer]
+	if not obj then
+		return
+	end
+	if obj.Billboard then obj.Billboard:Destroy() end
+	if obj.ScreenLabel then obj.ScreenLabel:Destroy() end
+	if obj.Highlight then obj.Highlight:Destroy() end
+	if obj.Tracer then obj.Tracer:Destroy() end
+	esp.Players[targetPlayer] = nil
+end
+
 function clearEsp(bucket)
 	for key, obj in pairs(bucket) do
 		if obj.Billboard then obj.Billboard:Destroy() end
@@ -5553,19 +5842,24 @@ function syncFreecamEspLabels()
 		end
 		autoHeal.FreecamEspActive = false
 		for targetPlayer, obj in pairs(esp.Players) do
+			local targetCharacter = targetPlayer.Character
+			local adornee = targetCharacter and getAdornee(targetCharacter)
+			local inRange = isWithinEspDistance(adornee, state.PlayerMaxEspDistance)
 			if obj.ScreenLabel then
 				obj.ScreenLabel.Visible = false
 			end
 			if obj.Billboard then
-				obj.Billboard.Enabled = state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
+				obj.Billboard.Enabled = inRange and state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
 			end
 		end
 		for _, obj in pairs(esp.World) do
+			local adornee = obj.Instance and obj.Instance.Parent and getAdornee(obj.Instance)
+			local inRange = isWithinEspDistance(adornee, state.WorldMaxEspDistance)
 			if obj.ScreenLabel then
 				obj.ScreenLabel.Visible = false
 			end
 			if obj.Billboard then
-				obj.Billboard.Enabled = state.WorldNames
+				obj.Billboard.Enabled = inRange and state.WorldNames
 			end
 		end
 		return
@@ -5575,18 +5869,20 @@ function syncFreecamEspLabels()
 	for targetPlayer, obj in pairs(esp.Players) do
 		local targetCharacter = targetPlayer.Character
 		local adornee = targetCharacter and getAdornee(targetCharacter)
+		local inRange = isWithinEspDistance(adornee, state.PlayerMaxEspDistance)
 		if obj.Billboard then
 			obj.Billboard.Enabled = not state.Freecam and state.PlayerEsp and (state.PlayerNames or state.PlayerTools)
 		end
-		drawScreenEspLabel(obj, adornee, state.PlayerEsp and (state.PlayerNames or state.PlayerTools), state.PlayerTextSize)
+		drawScreenEspLabel(obj, adornee, inRange and state.PlayerEsp and (state.PlayerNames or state.PlayerTools), state.PlayerTextSize)
 	end
 
 	for instance, obj in pairs(esp.World) do
 		local adornee = instance.Parent and getAdornee(instance)
+		local inRange = isWithinEspDistance(adornee, state.WorldMaxEspDistance)
 		if obj.Billboard then
 			obj.Billboard.Enabled = false
 		end
-		drawScreenEspLabel(obj, adornee, state.WorldNames, state.WorldTextSize)
+		drawScreenEspLabel(obj, adornee, inRange and state.WorldNames, state.WorldTextSize)
 	end
 end
 
@@ -5623,6 +5919,10 @@ function ensurePlayerEsp(targetPlayer, refreshLabel)
 	local targetCharacter = targetPlayer.Character
 	local adornee = getAdornee(targetCharacter)
 	if not targetCharacter or not adornee then
+		return
+	end
+	if not isWithinEspDistance(adornee, state.PlayerMaxEspDistance) then
+		destroyPlayerEsp(targetPlayer)
 		return
 	end
 
@@ -5808,6 +6108,10 @@ function isMeteorCore(instance)
 	return smallRock and smallRock:IsA("BasePart") and not isGrayColor(smallRock.Color)
 end
 
+function isVoidMeteorCore(instance)
+	return isVoidContentWorld() and instance:IsA("Model") and instance.Name == "Void Meteor Core" and getAdornee(instance) ~= nil
+end
+
 function isWanderingTrader(instance)
 	return instance == getWanderingTraderBody()
 end
@@ -5817,7 +6121,7 @@ function isMobInstance(instance)
 end
 
 function isRainbowEvent(instance)
-	return isTreasureChest(instance) or isWanderingTrader(instance)
+	return isTreasureChest(instance) or isWanderingTrader(instance) or isVoidMeteorCore(instance)
 end
 
 function rainbowColor(speed)
@@ -5834,7 +6138,9 @@ function getMeteorColor(instance)
 end
 
 function getEventColor(instance)
-	if isMeteorCore(instance) then
+	if isVoidMeteorCore(instance) then
+		return rainbowColor(0.12)
+	elseif isMeteorCore(instance) then
 		return getMeteorColor(instance)
 	elseif isWanderingTrader(instance) then
 		return Color3.fromRGB(150, 230, 255)
@@ -5845,6 +6151,8 @@ end
 function getEventLabel(instance)
 	if isTreasureChest(instance) then
 		return "Treasure Chest"
+	elseif isVoidMeteorCore(instance) then
+		return "Void Meteor Core"
 	elseif isMeteorCore(instance) then
 		return "Meteor Core"
 	elseif isWanderingTrader(instance) then
@@ -5920,7 +6228,7 @@ function godCounterText(instance, health)
 	local now = os.clock()
 	local data = autoHeal.GodCounters[instance]
 	if not data then
-		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0, EtaSeconds = nil, EtaTickTime = 0, Samples = { { Time = now, Health = health } } }
+		autoHeal.GodCounters[instance] = { LastHealth = health, LastTime = now, StartHealth = health, StartTime = now, Rate = 0, LastDamageTime = 0, EtaText = nil, LastEtaUpdate = 0, EtaSeconds = nil, EtaTickTime = 0, Samples = { { Time = now, Health = health } } }
 		return string.format("Health: %d", math.floor(health + 0.5))
 	end
 
@@ -5932,7 +6240,11 @@ function godCounterText(instance, health)
 		data.EtaSeconds = nil
 		data.EtaTickTime = 0
 		data.Samples = {}
+		data.StartHealth = health
+		data.StartTime = now
 	end
+	data.StartHealth = data.StartHealth or health
+	data.StartTime = data.StartTime or now
 	data.LastHealth = health
 	data.LastTime = now
 	table.insert(data.Samples, { Time = now, Health = health })
@@ -5950,7 +6262,18 @@ function godCounterText(instance, health)
 		local elapsed = data.EtaTickTime > 0 and math.max(now - data.EtaTickTime, 0) or 0
 		data.EtaTickTime = now
 		local rawSeconds = health / data.Rate
-		data.EtaSeconds = data.EtaSeconds and math.min(rawSeconds, math.max(1, data.EtaSeconds - elapsed)) or rawSeconds
+		if instance.Name == "Infinity God" then
+			if data.StartHealth and data.StartHealth > health then
+				local fightWindow = math.max(now - (data.StartTime or now), 0.001)
+				local fightRate = (data.StartHealth - health) / fightWindow
+				if fightRate > 0 then
+					rawSeconds = health / fightRate
+				end
+			end
+			data.EtaSeconds = rawSeconds
+		else
+			data.EtaSeconds = data.EtaSeconds and math.min(rawSeconds, math.max(1, data.EtaSeconds - elapsed)) or rawSeconds
+		end
 		if not data.EtaText or now - data.LastEtaUpdate >= 1 then
 			data.EtaText = formatEta(data.EtaSeconds)
 			data.LastEtaUpdate = now
@@ -6187,6 +6510,7 @@ function canBeWorldCandidate(instance)
 		)
 		or isTreasureChest(instance)
 		or isMeteorCore(instance)
+		or isVoidMeteorCore(instance)
 		or isWanderingTrader(instance)
 		or isMobInstance(instance)
 		or isAncientTreeInstance(instance)
@@ -6250,7 +6574,7 @@ function matchesWorldRule(instance, ruleName)
 	end
 
 	if ruleName == "Event" then
-		return isTreasureChest(instance) or isMeteorCore(instance) or isWanderingTrader(instance)
+		return isTreasureChest(instance) or isMeteorCore(instance) or isVoidMeteorCore(instance) or isWanderingTrader(instance)
 	end
 
 	if ruleName == "God" then
@@ -6439,7 +6763,8 @@ function updateWorldEsp()
 				local ruleName, enabled = ruleInfo[1], ruleInfo[2]
 				local limit = ruleName == "Dropped" and droppedLimit
 					or ruleLimit
-				if enabled and (ruleCounts[ruleName] or 0) < limit and matchesWorldRule(instance, ruleName) then
+				local adornee = getAdornee(instance)
+				if enabled and (ruleCounts[ruleName] or 0) < limit and adornee and isWithinEspDistance(adornee, state.WorldMaxEspDistance) and matchesWorldRule(instance, ruleName) then
 					active[instance] = true
 					ensureWorldEsp(instance, ruleName)
 					ruleCounts[ruleName] = (ruleCounts[ruleName] or 0) + 1
@@ -6568,6 +6893,9 @@ function updateBloodFruitCounter()
 end
 
 function skyRopeTargets()
+	if isVoidContentWorld() then
+		return {}
+	end
 	return {
 		Ancient = { Name = "Ancient Tree", RopePosition = Vector3.new(-489.0001220703125, 223.91123962402344, -877.7122802734375) },
 		Crystal = { Name = "Crystal", RopePosition = Vector3.new(-516.9925537109375, 80.73329162597656, -607.0921630859375) },
@@ -6678,6 +7006,13 @@ function pointInsidePart(part, position)
 end
 
 function updateIslandRopeNotifier(dt)
+	if isVoidContentWorld() then
+		table.clear(autoHeal.RopeTouching)
+		table.clear(autoHeal.RopeTouchNotify)
+		table.clear(autoHeal.RopeStates)
+		clearRopeRespawnMarkers()
+		return
+	end
 	if not state.IslandRopeNotifier then
 		table.clear(autoHeal.RopeTouching)
 		table.clear(autoHeal.RopeTouchNotify)
@@ -7358,7 +7693,7 @@ createSlider(sections.Fly, "Fly Speed", 0, 20, function() return state.FlySpeed 
 end)
 
 sections.TweenFollow = section(playerPage, "Tween Follow")
-createChoiceDropdown(sections.TweenFollow, "Follow Player", collectTweenFollowPlayers, function()
+tweenFollowDropdownRedraw = createChoiceDropdown(sections.TweenFollow, "Follow Player", collectTweenFollowPlayers, function()
 	return state.TweenFollowPlayer ~= "" and state.TweenFollowPlayer or "None"
 end, function(value)
 	state.TweenFollowPlayer = value == "None" and "" or value
@@ -7366,6 +7701,7 @@ end, function(value)
 		stopTweenFollow()
 	end
 end)
+createActionButton(sections.TweenFollow, "Select Closest Player", selectClosestTweenFollowPlayer)
 createToggle(sections.TweenFollow, "Tween Follow", function() return state.TweenFollow end, function(v)
 	state.TweenFollow = v
 	if v then
@@ -7383,6 +7719,23 @@ end)
 createSlider(sections.TweenFollow, "Tween Follow Speed", 1, 23, function() return state.TweenFollowSpeed end, function(v)
 	state.TweenFollowSpeed = v
 end)
+
+sections.PinchPlayer = section(playerPage, "Pinch Player")
+trapPlayerDropdownRedraw = createChoiceDropdown(sections.PinchPlayer, "Player", collectTweenFollowPlayers, function()
+	return state.TrapPlayer ~= "" and state.TrapPlayer or "None"
+end, function(value)
+	state.TrapPlayer = value == "None" and "" or value
+end)
+createActionButton(sections.PinchPlayer, "Closest Player", selectClosestTrapPlayer)
+createChoiceDropdown(sections.PinchPlayer, "Wall Type", collectTrapWallTypes, function()
+	return state.TrapWallType
+end, function(value)
+	state.TrapWallType = value
+end)
+createActionButton(sections.PinchPlayer, "Pinch Player", function()
+	trapSelectedPlayer(true)
+end)
+createKeybind(sections.PinchPlayer, "Pinch Keybind", "TrapKey")
 
 sections.Auras = section(playerPage, "Auras")
 autoHeal.AuraRedraws.Weapon = createToggle(sections.Auras, "Weapon Aura", function() return state.WeaponAura end, function(v)
@@ -7434,6 +7787,7 @@ autoDropToggleRedraw = createToggle(sections.AutoDrop, "Auto Drop", function() r
 	state.AutoDrop = v
 	autoHeal.DropTimer = 0
 	autoHeal.DropIndex = 1
+	autoHeal.DropStartTime = v and os.clock() or 0
 	resetAutoDropEstimate(false)
 end, autoDropToggleLabel)
 createSlider(sections.AutoDrop, "Drop Delay MS", 1, 1000, function() return state.AutoDropDelay end, function(v)
@@ -7538,6 +7892,16 @@ createSlider(sections.PlayerEsp, "FOV", 40, 120, function() return state.PlayerF
 		camera.FieldOfView = v
 	end
 end)
+createSlider(sections.PlayerEsp, "Max ESP Distance", 5, 20000, function() return state.PlayerMaxEspDistance end, function(v)
+	state.PlayerMaxEspDistance = v
+	for targetPlayer in pairs(esp.Players) do
+		local targetCharacter = targetPlayer.Character
+		local adornee = targetCharacter and getAdornee(targetCharacter)
+		if not isWithinEspDistance(adornee, state.PlayerMaxEspDistance) then
+			destroyPlayerEsp(targetPlayer)
+		end
+	end
+end)
 
 sections.WorldKinds = section(worldPage, "World ESP")
 createToggle(sections.WorldKinds, "Ores", function() return state.OreEsp end, function(v) state.OreEsp = v; updateWorldEsp() end)
@@ -7575,6 +7939,10 @@ createToggle(sections.WorldOptions, "Chams", function() return state.WorldChams 
 createToggle(sections.WorldOptions, "Distance", function() return state.WorldDistance end, function(v) state.WorldDistance = v end)
 createToggle(sections.WorldOptions, "Tracers", function() return state.WorldTracers end, function(v) state.WorldTracers = v end)
 createSlider(sections.WorldOptions, "Text Size", 10, 28, function() return state.WorldTextSize end, function(v) state.WorldTextSize = v end)
+createSlider(sections.WorldOptions, "Max ESP Distance", 5, 20000, function() return state.WorldMaxEspDistance end, function(v)
+	state.WorldMaxEspDistance = v
+	updateWorldEsp()
+end)
 
 sections.Settings = section(settingsPage, "Interface")
 createToggle(sections.Settings, "Performance Stats", function() return state.Stats end, function(v) state.Stats = v end)
@@ -7737,7 +8105,7 @@ end)
 connect(S.UserInputService.InputChanged, function(input)
 	if state.Freecam then
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			if not state.PanelVisible then
+			if not state.PanelVisible or state.Minimized then
 				freecam.Yaw -= input.Delta.X * 0.0025
 				freecam.Pitch = math.clamp(freecam.Pitch - input.Delta.Y * 0.0025, math.rad(-85), math.rad(85))
 			end
@@ -7786,6 +8154,7 @@ connect(minimize.MouseButton1Click, function()
 	tabs.Visible = not state.Minimized
 	minimize.Text = state.Minimized and "+" or "-"
 	syncMinimizedEffects()
+	syncFreecamMouse()
 	tween(main, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = state.Minimized and UI.MinPanelSize or UI.NormalPanelSize,
 	})
@@ -7803,6 +8172,7 @@ connect(close.MouseButton1Click, function()
 	stopFarmTweening()
 	stopTweenFollow()
 	destroyChestPreview()
+	resetPickupRuntime()
 	cleanupItemOrbit()
 	clearPlantBoxVisualizer()
 	screenGui:Destroy()
@@ -7881,6 +8251,11 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 		return
 	end
 
+	if input.KeyCode == state.TrapKey then
+		trapSelectedPlayer(true)
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.W then
 		if not state.Freecam then state.AutoRun = false end
 		if not state.Freecam then movementKeys.Forward = true end
@@ -7900,7 +8275,7 @@ connect(S.UserInputService.InputBegan, function(input, gameProcessed)
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		if not state.Freecam then movementKeys.Up = true end
 		freecam.Keys.Up = true
-	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C then
+	elseif input.KeyCode == Enum.KeyCode.LeftControl then
 		if not state.Freecam then movementKeys.Down = true end
 		freecam.Keys.Down = true
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
@@ -7924,7 +8299,7 @@ connect(S.UserInputService.InputEnded, function(input)
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		movementKeys.Up = false
 		freecam.Keys.Up = false
-	elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C then
+	elseif input.KeyCode == Enum.KeyCode.LeftControl then
 		movementKeys.Down = false
 		freecam.Keys.Down = false
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
@@ -7992,32 +8367,10 @@ connect(workspace.DescendantRemoving, function(descendant)
 	untrackWorldCandidate(descendant)
 end)
 
-local itemsFolder = workspace:FindFirstChild("Items")
-if itemsFolder then
-	trackPickupContainer(itemsFolder)
-	autoHeal.PickupTrackedInitialized = true
-	connect(itemsFolder.ChildAdded, instantPickupChild)
-	connect(itemsFolder.ChildAdded, trackPickupObject)
-	connect(itemsFolder.DescendantAdded, trackPickupObject)
-	connect(itemsFolder.DescendantAdded, instantPickupChild)
-end
-for _, folderName in ipairs({ "DroppedItems", "Drops" }) do
-	local dropFolder = workspace:FindFirstChild(folderName)
-	if dropFolder then
-		connect(dropFolder.ChildAdded, instantPickupChild)
-	end
-end
+bindPickupContainers()
 connect(workspace.ChildAdded, function(child)
 	if child.Name == "Items" or child.Name == "DroppedItems" or child.Name == "Drops" then
-		connect(child.ChildAdded, instantPickupChild)
-		if child.Name == "Items" then
-			table.clear(autoHeal.PickupTracked)
-			trackPickupContainer(child)
-			autoHeal.PickupTrackedInitialized = true
-			connect(child.ChildAdded, trackPickupObject)
-			connect(child.DescendantAdded, trackPickupObject)
-			connect(child.DescendantAdded, instantPickupChild)
-		end
+		bindPickupContainer(child)
 	end
 end)
 
@@ -8111,8 +8464,10 @@ connect(S.RunService.RenderStepped, function(dt)
 		for _, obj in pairs(esp.World) do
 			if obj.Instance and obj.Instance.Parent and obj.Tracer then
 				local adornee = getAdornee(obj.Instance)
-				if adornee then
+				if adornee and isWithinEspDistance(adornee, state.WorldMaxEspDistance) then
 					drawTracer(obj.Tracer, adornee.Position, true)
+				elseif obj.Tracer then
+					drawTracer(obj.Tracer, Vector3.zero, false)
 				end
 			end
 		end
@@ -8156,6 +8511,18 @@ connect(S.RunService.RenderStepped, function(dt)
 			if obj.Instance and obj.Instance.Parent then
 				local adornee = getAdornee(obj.Instance)
 				if adornee then
+					local inRange = isWithinEspDistance(adornee, state.WorldMaxEspDistance)
+					if not inRange then
+						obj.Billboard.Enabled = false
+						obj.Highlight.Enabled = false
+						if obj.ScreenLabel then
+							obj.ScreenLabel.Visible = false
+						end
+						if obj.Tracer then
+							drawTracer(obj.Tracer, adornee.Position, false)
+						end
+						continue
+					end
 					local rule = worldRules[obj.RuleName]
 					local color = obj.RuleName == "Dropped" and adornee.Color
 						or obj.RuleName == "Ore" and getOreColor(obj.Instance)
@@ -8227,6 +8594,7 @@ screenGui.Destroying:Connect(function()
 	stopDance()
 	stopFly()
 	restorePlayerAuraHitboxes()
+	resetPickupRuntime()
 	clearPlantBoxVisualizer()
 	clearGodRespawnMarkers()
 	clearRopeRespawnMarkers()
