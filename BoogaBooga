@@ -179,10 +179,10 @@ local state = {
 	WorldTracers = false,
 	WorldTextSize = 12,
 	WorldMaxEspDistance = 10000,
-	WorldMaxObjects = 55,
-	DroppedMaxObjects = 18,
-	WorldRefreshTime = 7,
-	WorldLabelRefreshTime = 0.8,
+	WorldMaxObjects = 35,
+	DroppedMaxObjects = 10,
+	WorldRefreshTime = 12,
+	WorldLabelRefreshTime = 1.25,
 	GodTreeCounter = true,
 	PerformanceGuard = true,
 	AutoLoadConfig = false,
@@ -251,8 +251,8 @@ local foodTypeNames = { "Cooked Meat", "Cooked Fish", "Cooked Morsel", "Strangef
 local plantableNames = { "Berry", "Bloodfruit", "Blood Fruit", "Jelly", "Apple", "Lemon" }
 local oreTypeNames = { "Iron", "Stone", "Adurite", "Gold", "Coal", "Obsidian", "Void Ore", "Emerald", "Magnetite Rock", "Flaming Coral" }
 local trapWallTypes = { "Wood Wall", "Stone Wall", "Ice Wall", "Iron Wall", "Adurite Wall", "Obsidian Wall", "Crystal Wall", "Magnetite Wall", "Emerald Wall" }
-local autoPickupRangeSq = 900
-local autoPickupChestRangeSq = 900
+local autoPickupRangeSq = 2500
+local autoPickupChestRangeSq = 2500
 local oreFallbackColors = {
 	Iron = Color3.fromRGB(185, 135, 85),
 	Stone = Color3.fromRGB(125, 125, 125),
@@ -440,11 +440,13 @@ local autoHeal = {
 	PickupSent = {},
 	PickupQueue = {},
 	PickupQueueIds = {},
+	PickupScanIds = {},
 	PickupBurstWindow = 0,
 	PickupBurstCount = 0,
 	PickupTracked = {},
 	PickupBoundContainers = {},
 	PickupTrackedInitialized = false,
+	PickupBindTimer = 0,
 	PlayerEspTimer = 0,
 	OrbitTimer = 0,
 	OrbitLastTime = 0,
@@ -481,7 +483,6 @@ local autoHeal = {
 	TweenFollowLastMove = 0,
 	TweenFollowLastGoal = nil,
 	TweenFollowLastJump = 0,
-	PinchSide = 1,
 	DropTimer = 0,
 	DropIndex = 1,
 	DropEstimateLastRemaining = nil,
@@ -2506,24 +2507,27 @@ function updateAutoHunger(dt)
 end
 
 function loadPickupModules()
-	if autoHeal.PickupModule and autoHeal.PickupRemote then
+	if autoHeal.PickupRemote then
 		return true
 	end
 	local gameFolder = S.ReplicatedStorage:FindFirstChild("Game")
 	local modules = S.ReplicatedStorage:FindFirstChild("Modules")
 	local pickupModule = gameFolder and gameFolder:FindFirstChild("pickup")
 	local packetsModule = modules and modules:FindFirstChild("Packets")
-	if not pickupModule or not packetsModule then
+	if not packetsModule then
 		return false
 	end
-	local okPickup, pickup = pcall(require, pickupModule)
 	local okPackets, packets = pcall(require, packetsModule)
-	if not okPickup or not okPackets or not packets.Pickup then
+	if not okPackets or not packets.Pickup or not packets.Pickup.send then
 		return false
 	end
 	local localSounds = S.ReplicatedStorage:FindFirstChild("LocalSounds")
 	local quicks = localSounds and localSounds:FindFirstChild("Quicks")
-	autoHeal.PickupModule = pickup
+	if pickupModule then
+		pcall(function()
+			autoHeal.PickupModule = require(pickupModule)
+		end)
+	end
 	autoHeal.PickupRemote = packets.Pickup
 	autoHeal.PickupSound = quicks and quicks:FindFirstChild("Pickup")
 	return true
@@ -2558,56 +2562,54 @@ function animatePickupPart(part)
 	end)
 end
 
-function pickupEncode(entityID)
-	return string.pack("<BBI3x", 0x01, 0xE7, entityID)
-end
-
-function getPickupByteNet()
-	if autoHeal.PickupByteNet and autoHeal.PickupByteNet.Parent then
-		return autoHeal.PickupByteNet
-	end
-	autoHeal.PickupByteNet = S.ReplicatedStorage:FindFirstChild("ByteNetReliable")
-	return autoHeal.PickupByteNet
-end
-
 function sendPickupPacket(entityID)
 	local now = os.clock()
 	local lastSent = autoHeal.PickupSent[entityID]
 	if lastSent and now - lastSent < 0.02 then
 		return false
 	end
-	autoHeal.PickupSent[entityID] = now
-	local remote = getPickupByteNet()
-	if remote then
-		local ok = pcall(function()
-			remote:FireServer(buffer.fromstring(pickupEncode(entityID)))
-		end)
-		if ok then
-			return true
-		end
+
+	if not loadPickupModules() or not autoHeal.PickupRemote then
+		return false
 	end
-	if loadPickupModules() and autoHeal.PickupRemote then
-		return pcall(function()
-			autoHeal.PickupRemote.send(entityID)
-		end)
+
+	local ok = pcall(function()
+		autoHeal.PickupRemote.send(entityID)
+	end)
+	if ok then
+		autoHeal.PickupSent[entityID] = now
+		return true
 	end
 	return false
 end
 
+function pickupEntityAttribute(instance)
+	if not instance then
+		return nil
+	end
+	for _, attributeName in ipairs({ "EntityID", "EntityId", "entityID", "entityId", "ID", "Id", "id" }) do
+		local value = instance:GetAttribute(attributeName)
+		if value then
+			return value
+		end
+	end
+	return nil
+end
+
 function pickupEntityID(item, part)
-	local entityID = item:GetAttribute("EntityID") or (part and part:GetAttribute("EntityID"))
+	local entityID = pickupEntityAttribute(item) or pickupEntityAttribute(part)
 	if entityID then
 		return entityID
 	end
 	for _, descendant in ipairs(item:GetDescendants()) do
-		entityID = descendant:GetAttribute("EntityID")
+		entityID = pickupEntityAttribute(descendant)
 		if entityID then
 			return entityID
 		end
 	end
 	local current = item.Parent
 	while current and current ~= workspace do
-		entityID = current:GetAttribute("EntityID")
+		entityID = pickupEntityAttribute(current)
 		if entityID then
 			return entityID
 		end
@@ -2737,28 +2739,59 @@ function sendQueuedPickups(limit)
 	end
 end
 
+function scanPickupContainerDirect(container, essenceOnly, root, scanLimit)
+	if not container then
+		return 0
+	end
+
+	table.clear(autoHeal.PickupScanIds)
+	local scanned = 0
+	local function tryScanItem(item)
+		scanned += 1
+		if scanLimit and scanned > scanLimit then
+			return false
+		end
+
+		local candidate = pickupCandidate(item, essenceOnly, root)
+		if candidate and not autoHeal.PickupScanIds[candidate.EntityID] then
+			autoHeal.PickupScanIds[candidate.EntityID] = true
+			sendPickupPacket(candidate.EntityID)
+		end
+		return true
+	end
+
+	for _, item in ipairs(container:GetChildren()) do
+		if not tryScanItem(item) then
+			return scanned
+		end
+		for _, descendant in ipairs(item:GetDescendants()) do
+			if descendant:IsA("Model") or descendant:IsA("BasePart") or descendant:IsA("Folder") then
+				if not tryScanItem(descendant) then
+					return scanned
+				end
+			end
+		end
+	end
+
+	return scanned
+end
+
 function pickupClosestItem(essenceOnly)
 	local currentCharacter, hum, root = getCharacterParts()
 	if not currentCharacter or not hum or hum.Health <= 0 or not root then
 		return
 	end
-	table.clear(autoHeal.PickupQueue)
-	table.clear(autoHeal.PickupQueueIds)
 	local scanned = 0
 	local itemsFolder = workspace:FindFirstChild("Items")
 	if itemsFolder then
-		if not autoHeal.PickupTrackedInitialized then
-			trackPickupContainer(itemsFolder)
-			autoHeal.PickupTrackedInitialized = true
-		end
-		queueTrackedPickups(essenceOnly, root)
+		scanned += scanPickupContainerDirect(itemsFolder, essenceOnly, root, 1200)
 	end
 	for _, folderName in ipairs({ "DroppedItems", "Drops" }) do
 		local dropFolder = workspace:FindFirstChild(folderName)
 		if dropFolder then
-			scanned += scanPickupContainer(dropFolder, essenceOnly, root, math.max(1, 180 - scanned))
+			scanned += scanPickupContainerDirect(dropFolder, essenceOnly, root, 400)
 		end
-		if scanned > 180 then
+		if scanned > 1600 then
 			break
 		end
 	end
@@ -2777,7 +2810,7 @@ function pickupClosestItem(essenceOnly)
 							if chestScanned > 200 then
 								break
 							end
-							queuePickupItem(item, false, root)
+							tryPickupItem(item, false, root)
 						end
 					end
 				end
@@ -2787,7 +2820,6 @@ function pickupClosestItem(essenceOnly)
 			end
 		end
 	end
-	sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 5) or #autoHeal.PickupQueue) or 10)
 end
 
 function instantPickupChild(item)
@@ -2815,23 +2847,20 @@ function instantPickupChild(item)
 	if not hum or hum.Health <= 0 or not root then
 		return
 	end
-	queuePickupItem(item, essenceOnly, root)
-	sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
+	tryPickupItem(item, essenceOnly, root)
 	task.delay(0.12, function()
-		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) and #autoHeal.PickupQueue < 180 then
+		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) then
 			local _, delayedHum, delayedRoot = getCharacterParts()
 			if delayedHum and delayedHum.Health > 0 and delayedRoot then
-				queuePickupItem(item, essenceOnly, delayedRoot)
-				sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
+				tryPickupItem(item, essenceOnly, delayedRoot)
 			end
 		end
 	end)
 	task.delay(0.45, function()
-		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) and #autoHeal.PickupQueue < 180 then
+		if item and item.Parent and screenGui.Parent and (state.AutoPickup or state.PickupEssence) then
 			local _, delayedHum, delayedRoot = getCharacterParts()
 			if delayedHum and delayedHum.Health > 0 and delayedRoot then
-				queuePickupItem(item, essenceOnly, delayedRoot)
-				sendQueuedPickups(state.AutoPickup and (isVoidWorld() and math.min(#autoHeal.PickupQueue, 3) or #autoHeal.PickupQueue) or 4)
+				tryPickupItem(item, essenceOnly, delayedRoot)
 			end
 		end
 	end)
@@ -2841,11 +2870,16 @@ function updateAutoPickup(dt)
 	if not state.AutoPickup and not state.PickupEssence then
 		table.clear(autoHeal.PickupQueue)
 		table.clear(autoHeal.PickupQueueIds)
+		autoHeal.PickupBindTimer = 0
 		return
 	end
-	bindPickupContainers()
+	autoHeal.PickupBindTimer += dt
+	if autoHeal.PickupBindTimer >= 1 then
+		autoHeal.PickupBindTimer = 0
+		bindPickupContainers()
+	end
 	autoHeal.PickupTimer += dt
-	if autoHeal.PickupTimer < (state.AutoPickup and voidSlow(0.02, 0.65) or voidSlow(0.14, 1)) then
+	if autoHeal.PickupTimer < (state.AutoPickup and voidSlow(0.08, 0.65) or voidSlow(0.2, 1)) then
 		return
 	end
 	autoHeal.PickupTimer = 0
@@ -2855,6 +2889,7 @@ end
 function resetPickupRuntime()
 	table.clear(autoHeal.PickupQueue)
 	table.clear(autoHeal.PickupQueueIds)
+	table.clear(autoHeal.PickupScanIds)
 	table.clear(autoHeal.PickupSent)
 	table.clear(autoHeal.PickupTracked)
 	table.clear(autoHeal.PickupBoundContainers)
@@ -2862,6 +2897,7 @@ function resetPickupRuntime()
 	autoHeal.PickupBurstCount = 0
 	autoHeal.PickupTrackedInitialized = false
 	autoHeal.PickupTimer = 0
+	autoHeal.PickupBindTimer = 0
 	autoHeal.PickupByteNet = nil
 end
 
@@ -2872,16 +2908,7 @@ function bindPickupContainer(container)
 	autoHeal.PickupBoundContainers[container] = true
 	connect(container.ChildAdded, instantPickupChild)
 	if container.Name == "Items" then
-		table.clear(autoHeal.PickupTracked)
-		trackPickupContainer(container)
-		autoHeal.PickupTrackedInitialized = true
-		connect(container.ChildAdded, trackPickupObject)
-		connect(container.DescendantAdded, trackPickupObject)
 		connect(container.DescendantAdded, instantPickupChild)
-	else
-		for _, item in ipairs(container:GetChildren()) do
-			trackPickupObject(item)
-		end
 	end
 end
 
@@ -3636,12 +3663,9 @@ function trapSelectedPlayer(silent)
 		return false
 	end
 	local forward = targetRoot.CFrame.LookVector
-	local right = targetRoot.CFrame.RightVector
-	local side = autoHeal.PinchSide or 1
-	local wallPosition = targetRoot.Position + forward * 10 + right * (0.5 * side)
+	local wallPosition = targetRoot.Position + forward * 10
 	local wallCFrame = CFrame.new(wallPosition.X, targetRoot.Position.Y - 2, wallPosition.Z)
 	if placeTrapWall(wallCFrame, state.TrapWallType, silent) then
-		autoHeal.PinchSide = -side
 		if not silent then
 			notify("Pinch Player", string.format("%s placed near %s.", state.TrapWallType, state.TrapPlayer))
 		end
@@ -6757,7 +6781,13 @@ function updateWorldEsp()
 		end
 	end
 	local candidates = getWorldCandidates()
+	local budgetHit = false
+	local scanBudget = state.PerformanceGuard and 0.01 or math.huge
 	for _, instance in ipairs(candidates) do
+		if os.clock() - scanStarted > scanBudget then
+			budgetHit = true
+			break
+		end
 		if not active[instance] then
 			for _, ruleInfo in ipairs(enabledRules) do
 				local ruleName, enabled = ruleInfo[1], ruleInfo[2]
@@ -6774,19 +6804,21 @@ function updateWorldEsp()
 		end
 	end
 
-	for instance, obj in pairs(esp.World) do
-		if not active[instance] or not obj.Instance.Parent then
-			if obj.Billboard then obj.Billboard:Destroy() end
-			if obj.ScreenLabel then obj.ScreenLabel:Destroy() end
-			if obj.Highlight then obj.Highlight:Destroy() end
-			if obj.Tracer then obj.Tracer:Destroy() end
-			esp.World[instance] = nil
+	if not budgetHit then
+		for instance, obj in pairs(esp.World) do
+			if not active[instance] or not obj.Instance.Parent then
+				if obj.Billboard then obj.Billboard:Destroy() end
+				if obj.ScreenLabel then obj.ScreenLabel:Destroy() end
+				if obj.Highlight then obj.Highlight:Destroy() end
+				if obj.Tracer then obj.Tracer:Destroy() end
+				esp.World[instance] = nil
+			end
 		end
 	end
 	if state.PerformanceGuard then
 		perf.WorldEspCost = os.clock() - scanStarted
-		if perf.WorldEspCost > 0.08 then
-			perf.WorldCooldown = math.min(8, state.WorldRefreshTime + perf.WorldEspCost * 18)
+		if budgetHit or perf.WorldEspCost > 0.08 then
+			perf.WorldCooldown = math.min(20, state.WorldRefreshTime + perf.WorldEspCost * 18)
 		elseif perf.WorldCooldown > state.WorldRefreshTime then
 			perf.WorldCooldown = math.max(state.WorldRefreshTime, perf.WorldCooldown - 0.25)
 		end
@@ -6795,7 +6827,7 @@ end
 
 perf = {
 	AverageFps = 60,
-	WorldCooldown = 3.5,
+	WorldCooldown = 12,
 	WorldEspCost = 0,
 	HealthTimer = 0,
 	BloodFruitTimer = 0,
